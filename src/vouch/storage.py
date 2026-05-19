@@ -111,6 +111,18 @@ class KBStore:
         self.root = root.resolve()
         self.kb_dir = self.root / KB_DIRNAME
 
+    def resolve_under_root(self, path: str | Path) -> Path:
+        # Guard against arbitrary-file-read primitives exposed by the MCP /
+        # JSONL `register_source_from_path` entrypoints. Symlinks are followed
+        # before the containment check so a symlink inside the project that
+        # points outside is rejected.
+        resolved = Path(path).resolve()
+        if not resolved.is_relative_to(self.root):
+            raise ValueError(
+                f"path must be inside project root ({self.root}): {resolved}"
+            )
+        return resolved
+
     # --- bootstrap ---------------------------------------------------------
 
     @classmethod

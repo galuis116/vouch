@@ -65,6 +65,44 @@ def test_jsonl_full_flow(store: KBStore, monkeypatch) -> None:
     assert caps["result"]["review_gated"] is True
 
 
+def test_register_source_from_path_rejects_outside_root(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch
+) -> None:
+    # Regression for #10: kb.register_source_from_path must not read files
+    # outside the project root. Without the guard, an agent can name
+    # /etc/passwd, ~/.ssh/id_rsa, etc. and exfiltrate the contents via
+    # kb.cite / kb.list_sources.
+    kb_root = tmp_path_factory.mktemp("kb")
+    outside = tmp_path_factory.mktemp("outside")
+    secret = outside / "secret.txt"
+    secret.write_text("super-secret payload")
+    store = KBStore.init(kb_root)
+    monkeypatch.chdir(store.root)
+    resp = handle_request({
+        "id": "r1", "method": "kb.register_source_from_path",
+        "params": {"path": str(secret)},
+    })
+    assert not resp["ok"]
+    assert resp["error"]["code"] == "invalid_request"
+    assert "project root" in resp["error"]["message"]
+    # The store should be empty — the secret must not have been ingested.
+    assert store.list_sources() == []
+
+
+def test_register_source_from_path_accepts_inside_root(
+    store: KBStore, monkeypatch
+) -> None:
+    inside = store.root / "doc.txt"
+    inside.write_text("project content")
+    monkeypatch.chdir(store.root)
+    resp = handle_request({
+        "id": "r1", "method": "kb.register_source_from_path",
+        "params": {"path": str(inside)},
+    })
+    assert resp["ok"]
+    assert len(store.list_sources()) == 1
+
+
 def test_jsonl_session_lifecycle(store: KBStore, monkeypatch) -> None:
     src = store.put_source(b"e")
     monkeypatch.chdir(store.root)
