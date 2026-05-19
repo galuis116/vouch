@@ -234,10 +234,6 @@ class KBStore:
     # --- claims ------------------------------------------------------------
 
     def put_claim(self, claim: Claim) -> Claim:
-        if self._claim_path(claim.id).exists():
-            raise ValueError(
-                f"claim {claim.id} already exists — use update_claim()"
-            )
         for cid_or_sid in claim.evidence:
             if (self._source_dir(cid_or_sid) / "meta.yaml").exists():
                 continue
@@ -246,7 +242,13 @@ class KBStore:
             raise ValueError(
                 f"claim {claim.id} cites unknown source/evidence {cid_or_sid}"
             )
-        self._claim_path(claim.id).write_text(_yaml_dump(claim.model_dump(mode="json")))
+        try:
+            with self._claim_path(claim.id).open("x") as f:
+                f.write(_yaml_dump(claim.model_dump(mode="json")))
+        except FileExistsError:
+            raise ValueError(
+                f"claim {claim.id} already exists — use update_claim()"
+            )
         return claim
 
     def get_claim(self, claim_id: str) -> Claim:
@@ -273,14 +275,16 @@ class KBStore:
     # --- pages -------------------------------------------------------------
 
     def put_page(self, page: Page) -> Page:
-        if self._page_path(page.id).exists():
-            raise ValueError(
-                f"page {page.id} already exists — use update or choose a different slug"
-            )
         for cid in page.claims:
             if not self._claim_path(cid).exists():
                 raise ValueError(f"page {page.id} references unknown claim {cid}")
-        self._page_path(page.id).write_text(_serialize_page(page))
+        try:
+            with self._page_path(page.id).open("x") as f:
+                f.write(_serialize_page(page))
+        except FileExistsError:
+            raise ValueError(
+                f"page {page.id} already exists — choose a different slug"
+            )
         return page
 
     def get_page(self, page_id: str) -> Page:
@@ -298,11 +302,13 @@ class KBStore:
     # --- entities ----------------------------------------------------------
 
     def put_entity(self, entity: Entity) -> Entity:
-        if self._entity_path(entity.id).exists():
+        try:
+            with self._entity_path(entity.id).open("x") as f:
+                f.write(_yaml_dump(entity.model_dump(mode="json")))
+        except FileExistsError:
             raise ValueError(
-                f"entity {entity.id} already exists — use update or choose a different slug"
+                f"entity {entity.id} already exists — choose a different slug"
             )
-        self._entity_path(entity.id).write_text(_yaml_dump(entity.model_dump(mode="json")))
         return entity
 
     def get_entity(self, eid: str) -> Entity:
@@ -321,11 +327,13 @@ class KBStore:
     # --- relations ---------------------------------------------------------
 
     def put_relation(self, rel: Relation) -> Relation:
-        if self._relation_path(rel.id).exists():
+        try:
+            with self._relation_path(rel.id).open("x") as f:
+                f.write(_yaml_dump(rel.model_dump(mode="json")))
+        except FileExistsError:
             raise ValueError(
-                f"relation {rel.id} already exists — use update or choose a different slug"
+                f"relation {rel.id} already exists — choose a different slug"
             )
-        self._relation_path(rel.id).write_text(_yaml_dump(rel.model_dump(mode="json")))
         return rel
 
     def get_relation(self, rid: str) -> Relation:
