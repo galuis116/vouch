@@ -21,32 +21,48 @@ DB_FILENAME = "state.db"
 
 SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(
-    id UNINDEXED,
-    text,
-    type UNINDEXED,
-    status UNINDEXED,
-    tags
+    id UNINDEXED, text, type UNINDEXED, status UNINDEXED, tags
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
-    id UNINDEXED,
-    title,
-    body,
-    type UNINDEXED,
-    tags
+    id UNINDEXED, title, body, type UNINDEXED, tags
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
-    id UNINDEXED,
-    name,
-    description,
-    type UNINDEXED,
-    aliases
+    id UNINDEXED, name, description, type UNINDEXED, aliases
 );
 
 CREATE TABLE IF NOT EXISTS index_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS embedding_index (
+    kind            TEXT NOT NULL,
+    id              TEXT NOT NULL,
+    vec             BLOB NOT NULL,
+    content_hash    TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    model_version   TEXT NOT NULL,
+    dim             INTEGER NOT NULL,
+    created_at      TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+
+CREATE INDEX IF NOT EXISTS embedding_index_kind ON embedding_index(kind);
+
+CREATE TABLE IF NOT EXISTS query_embedding_cache (
+    query_hash      TEXT PRIMARY KEY,
+    vec             BLOB NOT NULL,
+    hit_count       INTEGER NOT NULL DEFAULT 1,
+    last_used_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS embedding_dupes (
+    kind            TEXT NOT NULL,
+    id              TEXT NOT NULL,
+    near_id         TEXT NOT NULL,
+    cosine          REAL NOT NULL,
+    detected_at     TEXT NOT NULL
 );
 """
 
@@ -160,3 +176,71 @@ def stats(kb_dir: Path) -> dict[str, int]:
             "pages": conn.execute("SELECT COUNT(*) FROM pages_fts").fetchone()[0],
             "entities": conn.execute("SELECT COUNT(*) FROM entities_fts").fetchone()[0],
         }
+
+
+# --- embeddings storage --------------------------------------------------
+
+import datetime as _dt
+
+
+def _vec_to_blob(vec):  # type: ignore[no-untyped-def]
+    import numpy as np
+    return np.asarray(vec, dtype=np.float32).tobytes()
+
+
+def _blob_to_vec(blob: bytes, dim: int):  # type: ignore[no-untyped-def]
+    import numpy as np
+    return np.frombuffer(blob, dtype=np.float32, count=dim).copy()
+
+
+def put_embedding(
+    conn: sqlite3.Connection, *,
+    kind: str, id: str,
+    vec,  # type: ignore[no-untyped-def]
+    content_hash: str,
+    model: str, model_version: str, dim: int,
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO embedding_index "
+        "(kind, id, vec, content_hash, model, model_version, dim, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            kind, id, _vec_to_blob(vec), content_hash,
+            model, model_version, dim,
+            _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        ),
+    )
+
+
+def get_embedding(kb_dir: Path, *, kind: str, id: str):  # type: ignore[no-untyped-def]
+    """Return (vec, content_hash, model) or None."""
+    with open_db(kb_dir) as conn:
+        row = conn.execute(
+            "SELECT vec, content_hash, model, dim FROM embedding_index "
+            "WHERE kind = ? AND id = ?",
+            (kind, id),
+        ).fetchone()
+    if not row:
+        return None
+    blob, ch, model, dim = row
+    return _blob_to_vec(blob, dim), ch, model
+
+
+def set_embedding_meta(kb_dir: Path, *, model: str, version: str, dim: int) -> None:
+    with open_db(kb_dir) as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO index_meta (key, value) VALUES (?, ?)",
+            [
+                ("embedding_model", model),
+                ("embedding_model_version", version),
+                ("embedding_dim", str(dim)),
+            ],
+        )
+
+
+def get_embedding_meta(kb_dir: Path) -> dict[str, str]:
+    with open_db(kb_dir) as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM index_meta WHERE key LIKE 'embedding_%'"
+        ).fetchall()
+    return {k: v for k, v in rows}
