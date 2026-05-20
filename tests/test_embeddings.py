@@ -23,8 +23,8 @@ def test_embeddings_available_returns_bool() -> None:
 
 
 def test_encode_returns_expected_shape() -> None:
-    import numpy as np
     pytest.importorskip("sentence_transformers")
+    import numpy as np
     vec = encode(["hello world"])
     assert isinstance(vec, np.ndarray)
     assert vec.shape == (1, 384)
@@ -48,8 +48,8 @@ def test_index_and_search_embedding(store: KBStore) -> None:
             vec = encode([c.text])[0].tolist()
             index_db.index_embedding(conn, kind="claim", id=c.id, vec=vec)
         for p in store.list_pages():
-            vec = encode([f"{p.title} {p.body}"])[0].tolist()
-            index_db.index_embedding(conn, kind="page", id=p.id, vec=p.id)
+            page_vec = encode([f"{p.title} {p.body}"])[0].tolist()
+            index_db.index_embedding(conn, kind="page", id=p.id, vec=page_vec)
 
     query_vec = encode(["how do we authenticate users?"])[0].tolist()
     hits = index_db.search_embeddings(store.kb_dir, query_vec, limit=5)
