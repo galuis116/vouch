@@ -239,6 +239,7 @@ class KBStore:
             metadata=metadata or {},
         )
         meta_path.write_text(_yaml_dump(src.model_dump(mode="json")))
+        self._embed_and_store(kind="source", id=src.id, text=src.title or src.locator or "")
         return src
 
     def get_source(self, source_id: str) -> Source:
@@ -320,6 +321,7 @@ class KBStore:
             raise ValueError(
                 f"page {page.id} already exists -- choose a different slug"
             ) from e
+        self._embed_and_store(kind="page", id=page.id, text=f"{page.title}\n\n{page.body}")
         return page
 
     def get_page(self, page_id: str) -> Page:
@@ -344,6 +346,7 @@ class KBStore:
             raise ValueError(
                 f"entity {entity.id} already exists -- choose a different slug"
             ) from e
+        self._embed_and_store(kind="entity", id=entity.id, text=f"{entity.name}\n\n{entity.description or ''}")
         return entity
 
     def get_entity(self, eid: str) -> Entity:
@@ -369,6 +372,7 @@ class KBStore:
             raise ValueError(
                 f"relation {rel.id} already exists -- choose a different slug"
             ) from e
+        self._embed_and_store(kind="relation", id=rel.id, text=f"{rel.source} {rel.relation.value} {rel.target}")
         return rel
 
     def get_relation(self, rid: str) -> Relation:
@@ -402,6 +406,7 @@ class KBStore:
             raise ValueError(
                 f"evidence {ev.id} already exists -- choose a different slug"
             ) from e
+        self._embed_and_store(kind="evidence", id=ev.id, text=ev.quote or "")
         return ev
 
     def get_evidence(self, eid: str) -> Evidence:

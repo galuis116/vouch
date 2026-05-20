@@ -32,3 +32,45 @@ def test_put_claim_writes_embedding(store: KBStore) -> None:
     vec, ch, model = rec
     assert vec.shape == (8,)
     assert model == "mock"
+
+
+from vouch.models import Evidence, Relation, RelationType  # noqa: E402
+
+
+def test_put_page_writes_embedding(store: KBStore) -> None:
+    store.put_page(Page(id="p1", title="Title", body="page body"))
+    rec = index_db.get_embedding(store.kb_dir, kind="page", id="p1")
+    assert rec is not None
+    assert rec[0].shape == (8,)
+
+
+def test_put_source_writes_embedding(store: KBStore) -> None:
+    src = store.put_source(b"content bytes here", title="src1")
+    rec = index_db.get_embedding(store.kb_dir, kind="source", id=src.id)
+    assert rec is not None
+
+
+def test_put_entity_writes_embedding(store: KBStore) -> None:
+    store.put_entity(Entity(id="e1", name="AuthN", type=EntityType.CONCEPT,
+                            description="who you are"))
+    rec = index_db.get_embedding(store.kb_dir, kind="entity", id="e1")
+    assert rec is not None
+
+
+def test_put_relation_writes_embedding(store: KBStore) -> None:
+    store.put_entity(Entity(id="e1", name="x", type=EntityType.CONCEPT))
+    store.put_entity(Entity(id="e2", name="y", type=EntityType.CONCEPT))
+    rel = Relation(id="r1", relation=RelationType.SIMILAR_TO,
+                   source="e1", target="e2")
+    store.put_relation(rel)
+    rec = index_db.get_embedding(store.kb_dir, kind="relation", id="r1")
+    assert rec is not None
+
+
+def test_put_evidence_writes_embedding(store: KBStore) -> None:
+    src = store.put_source(b"abc")
+    ev = Evidence(id="ev1", source_id=src.id, locator="line 1",
+                  quote="excerpt text body")
+    store.put_evidence(ev)
+    rec = index_db.get_embedding(store.kb_dir, kind="evidence", id="ev1")
+    assert rec is not None
