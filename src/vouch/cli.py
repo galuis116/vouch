@@ -564,6 +564,24 @@ def index() -> None:
 
 
 @cli.command()
+@click.option("--threshold", default=0.95, show_default=True, type=float)
+@click.option("--dry-run/--no-dry-run", default=False)
+def dedup(threshold: float, dry_run: bool) -> None:
+    """Scan embeddings for cross-artifact near-duplicates."""
+    from .embeddings.dedup import scan_all
+    store = _load_store()
+    rows = scan_all(store.kb_dir, threshold=threshold, dry_run=dry_run)
+    if not rows:
+        click.echo("dedup: no duplicates found")
+        return
+    for r in rows:
+        click.echo(
+            f"{r['kind']}/{r['id']} ~ {r['kind']}/{r['near_id']}  "
+            f"cos={r['cosine']:.4f}"
+        )
+
+
+@cli.command()
 @click.option("--embeddings/--no-embeddings", default=False,
               help="Rebuild the embedding index in addition to FTS5.")
 @click.option("--backfill/--no-backfill", default=False,

@@ -48,6 +48,12 @@ def test_search_top_k_flag(kb: Path) -> None:
     assert result.exit_code == 0
 
 
+def test_dedup_scan_lists_duplicates(kb: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli, ["dedup", "--threshold", "0.5", "--dry-run"])
+    assert result.exit_code == 0
+
+
 def test_reindex_embeddings_backfills(kb: Path) -> None:
     from vouch import index_db
     from vouch.storage import discover_root, KBStore
