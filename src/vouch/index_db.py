@@ -129,7 +129,7 @@ def search_embeddings(kb_dir: Path, query_vec: list[float], *,
                       limit: int = 10
                       ) -> list[tuple[str, str, str, float]]:
     """Return (kind, id, snippet, cosine_score) via brute-force NumPy scan."""
-    import numpy as np
+    import numpy as np  # type: ignore[import-not-found]
     q = np.array(query_vec, dtype=np.float32)
     q = q / np.linalg.norm(q)
     out: list[tuple[str, str, str, float]] = []

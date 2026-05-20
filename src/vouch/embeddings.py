@@ -21,7 +21,7 @@ def embeddings_available() -> bool:
     global _AVAILABLE
     if _AVAILABLE is None:
         try:
-            import sentence_transformers  # noqa: F401
+            import sentence_transformers  # type: ignore[import-not-found]  # noqa: F401
             _AVAILABLE = True
         except ImportError:
             _AVAILABLE = False
@@ -36,13 +36,13 @@ def _load() -> Any:
                 "sentence-transformers is not installed. "
                 "Install it with: pip install vouch[embeddings]"
             )
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
         _MODEL = SentenceTransformer(_MODEL_NAME)
     return _MODEL
 
 
 def encode(texts: list[str], *, normalize: bool = True):
-    import numpy as np
+    import numpy as np  # type: ignore[import-not-found]
     model = _load()
     emb = model.encode(texts, normalize_embeddings=normalize)
     return np.asarray(emb, dtype=np.float32)
