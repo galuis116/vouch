@@ -220,7 +220,7 @@ def _validate_content(path: str, data: bytes, issues: list[str]) -> None:
     validator = VALIDATORS.get(subdir)
     if validator is None:
         return
-    if not any(path.endswith(ext) for ext in (".yaml", ".yml", ".md")):
+    if not any(path.lower().endswith(ext) for ext in (".yaml", ".yml", ".md")):
         return
     try:
         validator(data)
