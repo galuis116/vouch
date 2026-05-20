@@ -95,6 +95,21 @@ def test_update_claim_recomputes_embedding(store: KBStore) -> None:
     assert rec_after[1] != hash_before
 
 
+def test_kb_search_defaults_to_semantic_then_fts5(
+    store: KBStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from vouch import server
+    monkeypatch.setattr(server, "_store", lambda: store)
+    src = store.put_source(b"e")
+    store.put_claim(Claim(id="c1", text="authentication design", evidence=[src.id]))
+    from vouch import health
+    health.rebuild_index(store)
+    result = server.kb_search("authentication design", limit=5)
+    assert result["hits"]
+    assert result["backend"] in ("embedding", "fts5", "substring")
+    assert result["hits"][0]["id"] == "c1"
+
+
 def test_search_semantic_returns_top_hits(store: KBStore) -> None:
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="alpha alpha alpha", evidence=[src.id]))
