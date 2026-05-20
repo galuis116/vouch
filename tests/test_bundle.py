@@ -14,6 +14,8 @@ from vouch import bundle
 from vouch.models import Claim, Page
 from vouch.storage import KBStore
 
+_UNSAFE_PATH_RE = r"traversal|absolute path|nul byte|unsafe path|empty path"
+
 
 @pytest.fixture
 def store(tmp_path: Path) -> KBStore:
@@ -101,7 +103,7 @@ def test_import_apply_rejects_path_traversal(store: KBStore, tmp_path: Path) -> 
     canary = tmp_path.parent / "evil.txt"
     canary_existed = canary.exists()
     try:
-        with pytest.raises(RuntimeError, match=r"path traversal|unsafe path"):
+        with pytest.raises(RuntimeError, match=_UNSAFE_PATH_RE):
             bundle.import_apply(store.kb_dir, bundle_path)
         assert canary.exists() == canary_existed, "import wrote outside kb_dir"
     finally:
@@ -113,7 +115,7 @@ def test_import_apply_rejects_absolute_path(store: KBStore, tmp_path: Path) -> N
     target = tmp_path / "absolute-victim.txt"
     bundle_path = tmp_path / "abs.tar.gz"
     _write_malicious_bundle(bundle_path, str(target), b"pwned")
-    with pytest.raises(RuntimeError, match=r"path traversal|unsafe path"):
+    with pytest.raises(RuntimeError, match=_UNSAFE_PATH_RE):
         bundle.import_apply(store.kb_dir, bundle_path)
     assert not target.exists()
 
@@ -123,4 +125,7 @@ def test_import_check_flags_path_traversal(store: KBStore, tmp_path: Path) -> No
     _write_malicious_bundle(bundle_path, "../../evil.txt", b"pwned")
     result = bundle.import_check(store.kb_dir, bundle_path)
     assert not result.ok
-    assert any("traversal" in i or "unsafe" in i for i in result.issues)
+    assert any(
+        "traversal" in i or "unsafe" in i or "absolute path" in i
+        for i in result.issues
+    )

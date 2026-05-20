@@ -112,6 +112,18 @@ class ExportCheckResult:
     issues: list[str]
 
 
+def _unsafe_name_reason(name: str) -> str | None:
+    if not name:
+        return "empty path in bundle"
+    if name.startswith("/"):
+        return f"absolute path in bundle: {name!r}"
+    if "\x00" in name:
+        return f"nul byte in bundle path: {name!r}"
+    if ".." in Path(name).parts:
+        return f"path traversal in bundle: {name!r}"
+    return None
+
+
 def export_check(bundle_path: Path) -> ExportCheckResult:
     """Verify every file in the bundle matches its manifest hash."""
     issues: list[str] = []
@@ -126,19 +138,17 @@ def export_check(bundle_path: Path) -> ExportCheckResult:
         bundle_id = manifest.get("bundle_id", "")
         recorded = {f["path"]: f for f in manifest["files"]}
         for path in recorded:
-            if path.startswith("/") or ".." in Path(path).parts or "\x00" in path:
-                issues.append(f"unsafe path in manifest: {path!r}")
+            reason = _unsafe_name_reason(path)
+            if reason is not None:
+                issues.append(f"unsafe path in manifest: {reason}")
         for member in tar.getmembers():
             if member.name == MANIFEST_NAME:
                 continue
             if not member.isfile():
                 continue
-            if (
-                member.name.startswith("/")
-                or ".." in Path(member.name).parts
-                or "\x00" in member.name
-            ):
-                issues.append(f"unsafe path in bundle: {member.name!r}")
+            reason = _unsafe_name_reason(member.name)
+            if reason is not None:
+                issues.append(reason)
                 continue
             files_checked += 1
             rec = recorded.get(member.name)
@@ -164,8 +174,9 @@ def export_check(bundle_path: Path) -> ExportCheckResult:
 
 
 def _safe_member_path(kb_dir: Path, member_name: str) -> Path:
-    if not member_name or member_name.startswith("/") or "\x00" in member_name:
-        raise RuntimeError(f"unsafe path in bundle: {member_name!r}")
+    reason = _unsafe_name_reason(member_name)
+    if reason is not None:
+        raise RuntimeError(reason)
     kb_root = kb_dir.resolve()
     dest = (kb_root / member_name).resolve()
     try:
