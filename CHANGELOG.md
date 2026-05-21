@@ -30,6 +30,7 @@ All notable changes to vouch are documented here. Format follows
 - Add `put_relation_idempotent()` to `KBStore` and use it in `supersede()` and `contradict()` so retrying after a partial failure converges to a consistent state instead of raising `ValueError`.
 - Raise `ProposalError("forbidden_self_approval")` in `proposals.approve()` when `approved_by == proposal.proposed_by`, enforcing the review-gate guarantee documented in the README and CONTRIBUTING.
 - `crystallize()` now sets `review.approver_role: trusted-agent` context so single-agent sessions can be crystallized without hitting the `forbidden_self_approval` guard (#47).
+- Narrow `except Exception` to `except ArtifactNotFoundError` in `propose_claim()` evidence validation so I/O and parse errors propagate with their original type instead of being masked as `unknown source/evidence id` (#48).
 - Bundle import rejects tar members whose path escapes `kb_dir`
   (CVE-2007-4559, #9). Previously a crafted `.tar.gz` with a member
   named `../../evil.txt` could write outside `.vouch/`; the manifest
