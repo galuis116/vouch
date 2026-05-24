@@ -50,7 +50,7 @@ def supersede(
         relation=RelationType.SUPERSEDES,
         target=old.id,
     )
-    store.put_relation(rel)
+    store.put_relation_idempotent(rel)
     audit.log_event(
         store.kb_dir, event="claim.supersede", actor=actor,
         object_ids=[old.id, new.id, rel.id],
@@ -81,7 +81,7 @@ def contradict(
         relation=RelationType.CONTRADICTS,
         target=b.id,
     )
-    store.put_relation(rel)
+    store.put_relation_idempotent(rel)
     audit.log_event(
         store.kb_dir, event="claim.contradict", actor=actor,
         object_ids=[a.id, b.id, rel.id],
