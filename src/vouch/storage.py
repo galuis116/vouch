@@ -64,6 +64,24 @@ class ArtifactNotFoundError(KeyError):
     pass
 
 
+def _starter_config() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "review": {"require_human_approval": True},
+        "retrieval": {
+            "backends": ["fts5", "substring"],
+            "default_limit": 10,
+        },
+        "agents": {
+            "recommended_loop": [
+                "kb.search before writing",
+                "kb.propose_* with citations",
+                "human review via vouch pending/show/approve",
+            ],
+        },
+    }
+
+
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -156,15 +174,7 @@ class KBStore:
         for sub in SUBDIRS:
             (kb.kb_dir / sub).mkdir(exist_ok=True)
         if not kb.config_path.exists():
-            kb.config_path.write_text(
-                _yaml_dump(
-                    {
-                        "version": 1,
-                        "review": {"require_human_approval": True},
-                        "retrieval": {"backends": ["fts5", "substring"]},
-                    }
-                )
-            )
+            kb.config_path.write_text(_yaml_dump(_starter_config()))
         gi = kb.kb_dir / ".gitignore"
         if not gi.exists():
             # state.db is derived; proposed/ is the agent's scratch space.
@@ -468,7 +478,9 @@ class KBStore:
 
     # --- embedding hook ------------------------------------------------------
 
-    def _embed_and_store(self, *, kind: str, id: str, text: str) -> None:
+    def _embed_and_store(
+        self, *, kind: str, id: str, text: str, force: bool = False
+    ) -> None:
         """Compute and persist an embedding for an artifact.
 
         Skipped only if (kind, id) already has an embedding produced by
@@ -489,7 +501,9 @@ class KBStore:
             return
         try:
             embedder = get_embedder()
-        except KeyError:
+        except (KeyError, ImportError):
+            # No embedder registered, or the registered adapter's heavy deps
+            # (e.g. sentence-transformers) aren't installed. Best-effort hook.
             return
         try:
             h = content_hash(text)
@@ -497,7 +511,8 @@ class KBStore:
             # existing is (vec, content_hash, model); skip only when both the
             # content AND the embedder model match what's on disk.
             if (
-                existing is not None
+                not force
+                and existing is not None
                 and existing[1] == h
                 and existing[2] == embedder.name
             ):
