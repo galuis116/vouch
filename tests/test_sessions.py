@@ -19,10 +19,20 @@ def store(tmp_path: Path) -> KBStore:
 def test_session_lifecycle_and_crystallize(store: KBStore) -> None:
     src = store.put_source(b"e")
     sess = sess_mod.session_start(store, agent="claude-code", task="design")
-    pr1 = propose_claim(store, text="first finding", evidence=[src.id],
-                        proposed_by="claude-code", session_id=sess.id)
-    pr2 = propose_claim(store, text="second finding", evidence=[src.id],
-                        proposed_by="claude-code", session_id=sess.id)
+    pr1 = propose_claim(
+        store,
+        text="first finding",
+        evidence=[src.id],
+        proposed_by="claude-code",
+        session_id=sess.id,
+    )
+    pr2 = propose_claim(
+        store,
+        text="second finding",
+        evidence=[src.id],
+        proposed_by="claude-code",
+        session_id=sess.id,
+    )
     sess = sess_mod.session_end(store, sess.id)
     assert sorted(sess.proposal_ids) == sorted([pr1.id, pr2.id])
 
@@ -30,15 +40,15 @@ def test_session_lifecycle_and_crystallize(store: KBStore) -> None:
     assert len(result["approved"]) == 2
     assert result["summary_page_id"] is not None
     assert {c.text for c in store.list_claims()} == {
-        "first finding", "second finding",
+        "first finding",
+        "second finding",
     }
 
 
 def test_crystallize_skips_already_approved(store: KBStore) -> None:
     src = store.put_source(b"e")
     sess = sess_mod.session_start(store, agent="a")
-    pr = propose_claim(store, text="t", evidence=[src.id], proposed_by="a",
-                       session_id=sess.id)
+    pr = propose_claim(store, text="t", evidence=[src.id], proposed_by="a", session_id=sess.id)
     approve(store, pr.id, approved_by="u")
     sess_mod.session_end(store, sess.id)
     result = sess_mod.crystallize(store, sess.id, approver="u")
@@ -48,8 +58,9 @@ def test_crystallize_skips_already_approved(store: KBStore) -> None:
 def test_crystallize_single_agent_succeeds(tmp_path, monkeypatch) -> None:
     """Single-agent crystallize must succeed when trusted-agent is configured."""
     import yaml
-    from vouch.storage import KBStore
+
     from vouch import sessions as sess_mod
+    from vouch.storage import KBStore
 
     store = KBStore.init(tmp_path)
     monkeypatch.chdir(store.root)
@@ -64,9 +75,13 @@ def test_crystallize_single_agent_succeeds(tmp_path, monkeypatch) -> None:
     sess = sess_mod.session_start(store, agent="alice")
 
     from vouch.proposals import propose_claim
+
     propose_claim(
-        store, text="a claim", evidence=[src.id],
-        proposed_by="alice", session_id=sess.id,
+        store,
+        text="a claim",
+        evidence=[src.id],
+        proposed_by="alice",
+        session_id=sess.id,
     )
 
     result = sess_mod.crystallize(store, sess.id, approver="alice")
@@ -76,9 +91,12 @@ def test_crystallize_single_agent_succeeds(tmp_path, monkeypatch) -> None:
 
 def test_crystallize_collects_approval_failures(store):
     from unittest.mock import patch
+
     from vouch.proposals import propose_claim
+
     src = store.put_source(b"e")
     import vouch.sessions as sess_mod
+
     sess = sess_mod.session_start(store, agent="a", task="t")
     propose_claim(store, text="t", evidence=[src.id], proposed_by="a", session_id=sess.id)
     propose_claim(store, text="u", evidence=[src.id], proposed_by="a", session_id=sess.id)
