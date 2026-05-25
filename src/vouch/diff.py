@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from .models import Claim, Page
 from .storage import ArtifactNotFoundError, KBStore
 
 # (long-text field rendered as a line diff, scalar/list fields shown as old→new)
@@ -82,6 +83,8 @@ def diff_artifacts(store: KBStore, old_id: str, new_id: str) -> ArtifactDiff:
     if old_kind != new_kind:
         raise DiffError(f"cannot diff {old_kind} against {new_kind}")
 
+    old: Claim | Page
+    new: Claim | Page
     if old_kind == "claim":
         old, new = store.get_claim(old_id), store.get_claim(new_id)
         fields, text_field = _CLAIM_FIELDS, _CLAIM_TEXT
