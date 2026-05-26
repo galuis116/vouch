@@ -53,6 +53,17 @@ All notable changes to vouch are documented here. Format follows
   with between `import_check` and the apply re-open is rejected
   before anything reaches disk and the audit log does not record
   a `bundle.import` event.
+- Close the review-gate bypass in `sessions.crystallize` (#76). The
+  durable session-summary page wrote `sess.task`, `sess.note`, and
+  `sess.agent` verbatim into rendered markdown, letting an agent
+  land arbitrary content into `pages/` by calling
+  `kb.session_start(task=...)` and getting any one claim approved
+  via crystallize. The summary body now contains only fields the
+  proposing agent cannot influence (session id, server-clock
+  timestamps, list of approved artifact ids). The
+  `session.crystallize` audit event now also includes the summary
+  page id in `object_ids` when a page is written, so `vouch audit`
+  truthfully attributes the write.
 
 ## [0.0.1] — 2026-05-17
 
