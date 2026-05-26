@@ -119,6 +119,7 @@ def _serialize_page(page: Page) -> str:
 
 
 def _deserialize_page(text: str) -> Page:
+    text = text.replace("\r\n", "\n")
     m = _FRONTMATTER_RE.match(text)
     if not m:
         raise ValueError("page file missing YAML frontmatter")
@@ -151,8 +152,10 @@ class KBStore:
             raise ValueError(
                 f"path must be inside project root ({self.root}): {resolved}"
             )
+        if resolved.is_dir():
+            raise ValueError(f"not a regular file: {resolved}")
         try:
-            fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         except OSError as e:
             raise ValueError(f"cannot read {resolved}: {e}") from e
         try:
