@@ -6,14 +6,15 @@ All notable changes to vouch are documented here. Format follows
 
 ## [Unreleased]
 
-### Fixed
-- `discover_root()` now honours `VOUCH_KB_PATH=/abs/path/.vouch` and returns the parent root, instead of always walking up from cwd. The env var was already documented in `adapters/generic-mcp/README.md` but wasn't wired into the code — closing the doc-vs-code drift removes the `"cwd": "..."` ceremony hosts like Claude Desktop need today to point at a specific KB.
 ### Added
 - `vouch fsck` performs deep consistency checks beyond `vouch doctor`:
   orphaned embeddings, dangling supersede/contradict chains, decided
   proposals whose artifact is missing, and FTS5 index-vs-file drift
   (orphan rows, missing rows, status drift). Read-only; reports findings
   with object ids. `--fix` is intentionally out of scope (#96).
+- `vouch migrate` checks, dry-runs, and applies on-disk KB format migrations,
+  preserving audit history and rebuilding derived indexes after successful
+  upgrades.
 - `vouch expire` garbage-collects stale pending proposals: dry-run by default,
   `--apply` moves them to `decided/` with `decision_reason: expired`, emits
   `proposal.expire` audit events, and honors `review.expire_pending_after_days`
@@ -27,6 +28,9 @@ All notable changes to vouch are documented here. Format follows
   into the CLI, MCP server, and JSONL server entry points. `VOUCH_LOG_FORMAT`
   was already documented in `ROADMAP.md` and `adapters/generic-mcp/README.md`
   but had no implementation (#97).
+
+### Fixed
+- `discover_root()` now honours `VOUCH_KB_PATH=/abs/path/.vouch` and returns the parent root, instead of always walking up from cwd. The env var was already documented in `adapters/generic-mcp/README.md` but wasn't wired into the code — closing the doc-vs-code drift removes the `"cwd": "..."` ceremony hosts like Claude Desktop need today to point at a specific KB.
 
 ## [0.1.0] — 2026-05-26
 
