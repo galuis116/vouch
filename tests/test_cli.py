@@ -10,6 +10,7 @@ which slipped past the except and surfaced as a traceback.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -81,6 +82,41 @@ def test_propose_entity_empty_name_shows_clean_error(store: KBStore) -> None:
 def test_show_missing_proposal_shows_clean_error(store: KBStore) -> None:
     result = CliRunner().invoke(cli, ["show", "no-such-proposal"])
     _assert_clean_error(result, "proposal no-such-proposal")
+
+
+def test_pending_json_empty_queue(store: KBStore) -> None:
+    result = CliRunner().invoke(cli, ["pending", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == []
+
+
+def test_pending_json_lists_pending_proposals(store: KBStore) -> None:
+    src = store.put_source(b"e")
+    pr = propose_claim(store, text="pending json claim", evidence=[src.id], proposed_by="agent")
+
+    result = CliRunner().invoke(cli, ["pending", "--json"])
+
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.output)
+    assert len(rows) == 1
+    assert rows[0]["id"] == pr.id
+    assert rows[0]["kind"] == "claim"
+    assert rows[0]["proposed_by"] == "agent"
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["payload"]["text"] == "pending json claim"
+
+
+def test_pending_human_output_remains_text(store: KBStore) -> None:
+    src = store.put_source(b"e")
+    pr = propose_claim(store, text="pending text claim", evidence=[src.id], proposed_by="agent")
+
+    result = CliRunner().invoke(cli, ["pending"])
+
+    assert result.exit_code == 0, result.output
+    assert pr.id in result.output
+    assert "[claim]  by agent" in result.output
+    assert "pending text claim" in result.output
 
 
 def test_review_approves_pending_proposal(

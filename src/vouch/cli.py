@@ -189,10 +189,14 @@ def doctor() -> None:
 
 
 @cli.command()
-def pending() -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON instead of text.")
+def pending(as_json: bool) -> None:
     """List proposals awaiting review."""
     store = _load_store()
     pending = store.list_proposals(ProposalStatus.PENDING)
+    if as_json:
+        _emit_json([pr.model_dump(mode="json") for pr in pending])
+        return
     if not pending:
         click.echo("no pending proposals")
         return
