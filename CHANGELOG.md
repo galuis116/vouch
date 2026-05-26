@@ -7,11 +7,21 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- `vouch sync-check` and `vouch sync-apply` reconcile another `.vouch`
+  directory or bundle by importing only non-conflicting durable artifacts and
+  reporting conflicts without overwriting reviewed knowledge.
+- `vouch pending --json` emits pending proposals as structured JSON for shell
+  scripts, CI checks, and multi-agent review dashboards.
+- `vouch diff <id-old> <id-new>` shows what changed between two claim revisions or two page revisions — field-level changes plus a line-diff of the long text/body. Auto-detects the artifact kind and hides always-churning metadata. Read-only; supports `--json`.
 - Seed a cited starter source and claim during `vouch init`, print first-run
   next steps, and document a 30-second onboarding tour (#54).
+- Add `vouch review`, a guided CLI queue for approving, rejecting, skipping,
+  or dry-running pending proposals without bypassing the review gate.
 
 ### Fixed
+- Add `put_relation_idempotent()` to `KBStore` and use it in `supersede()` and `contradict()` so retrying after a partial failure converges to a consistent state instead of raising `ValueError`.
 - Raise `ProposalError("forbidden_self_approval")` in `proposals.approve()` when `approved_by == proposal.proposed_by`, enforcing the review-gate guarantee documented in the README and CONTRIBUTING.
+- `crystallize()` now sets `review.approver_role: trusted-agent` context so single-agent sessions can be crystallized without hitting the `forbidden_self_approval` guard (#47).
 - Bundle import rejects tar members whose path escapes `kb_dir`
   (CVE-2007-4559, #9). Previously a crafted `.tar.gz` with a member
   named `../../evil.txt` could write outside `.vouch/`; the manifest
@@ -63,6 +73,17 @@ All notable changes to vouch are documented here. Format follows
   `invalid_claim` findings ("edit the YAML to add a citation, or
   delete the file") instead of bailing out — so existing KBs get a
   clean repair list rather than a traceback.
+- Close the review-gate bypass in `sessions.crystallize` (#76). The
+  durable session-summary page wrote `sess.task`, `sess.note`, and
+  `sess.agent` verbatim into rendered markdown, letting an agent
+  land arbitrary content into `pages/` by calling
+  `kb.session_start(task=...)` and getting any one claim approved
+  via crystallize. The summary body now contains only fields the
+  proposing agent cannot influence (session id, server-clock
+  timestamps, list of approved artifact ids). The
+  `session.crystallize` audit event now also includes the summary
+  page id in `object_ids` when a page is written, so `vouch audit`
+  truthfully attributes the write.
 
 ## [0.0.1] — 2026-05-17
 
