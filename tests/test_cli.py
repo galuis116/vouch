@@ -83,6 +83,7 @@ def test_show_missing_proposal_shows_clean_error(store: KBStore) -> None:
 
 
 def test_fsck_clean_kb_prints_clean_and_exits_zero(store: KBStore) -> None:
+    """`vouch fsck` on a fresh KB exits 0 and only emits info-level findings."""
     from vouch.models import Claim
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="t", evidence=[src.id]))
@@ -93,6 +94,7 @@ def test_fsck_clean_kb_prints_clean_and_exits_zero(store: KBStore) -> None:
 
 
 def test_fsck_reports_dangling_chain_and_exits_nonzero(store: KBStore) -> None:
+    """`vouch fsck` exits 1 on error findings and prints affected object ids."""
     from vouch.models import Claim
     src = store.put_source(b"e")
     store.put_claim(Claim(

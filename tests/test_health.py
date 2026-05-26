@@ -58,6 +58,7 @@ def test_list_claims_filtered_by_status(store: KBStore) -> None:
 
 
 def _index_claim(store: KBStore, claim: Claim) -> None:
+    """Write the FTS5 row for `claim` so fsck sees a healthy index baseline."""
     with index_db.open_db(store.kb_dir) as conn:
         index_db.index_claim(
             conn, id=claim.id, text=claim.text,
@@ -66,6 +67,7 @@ def _index_claim(store: KBStore, claim: Claim) -> None:
 
 
 def test_fsck_clean_kb_passes(store: KBStore) -> None:
+    """A KB with one consistently-indexed claim is fsck-clean."""
     src = store.put_source(b"e")
     c = Claim(id="c1", text="t", evidence=[src.id])
     store.put_claim(c)
@@ -76,6 +78,7 @@ def test_fsck_clean_kb_passes(store: KBStore) -> None:
 
 
 def test_fsck_flags_dangling_supersedes(store: KBStore) -> None:
+    """`claim.supersedes` pointing at a missing claim is an error."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="t", evidence=[src.id],
                           supersedes=["ghost"]))
@@ -86,6 +89,7 @@ def test_fsck_flags_dangling_supersedes(store: KBStore) -> None:
 
 
 def test_fsck_flags_dangling_superseded_by(store: KBStore) -> None:
+    """`claim.superseded_by` pointing at a missing claim is an error."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="t", evidence=[src.id],
                           superseded_by="ghost"))
@@ -95,6 +99,7 @@ def test_fsck_flags_dangling_superseded_by(store: KBStore) -> None:
 
 
 def test_fsck_flags_dangling_contradicts(store: KBStore) -> None:
+    """`claim.contradicts` pointing at a missing claim is an error."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="t", evidence=[src.id],
                           contradicts=["ghost"]))
@@ -104,6 +109,7 @@ def test_fsck_flags_dangling_contradicts(store: KBStore) -> None:
 
 
 def test_fsck_flags_asymmetric_contradicts(store: KBStore) -> None:
+    """A → B contradiction not mirrored by B → A is a warning, not silent."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="a", evidence=[src.id],
                           contradicts=["c2"]))
@@ -114,6 +120,7 @@ def test_fsck_flags_asymmetric_contradicts(store: KBStore) -> None:
 
 
 def test_fsck_decided_missing_artifact(store: KBStore) -> None:
+    """An approved decided proposal whose artifact is gone is reported."""
     store.put_proposal(Proposal(
         id="prop-1",
         kind=ProposalKind.CLAIM,
@@ -133,6 +140,7 @@ def test_fsck_decided_missing_artifact(store: KBStore) -> None:
 
 
 def test_fsck_index_orphan_row(store: KBStore) -> None:
+    """An FTS5 row with no on-disk claim is reported as an index orphan."""
     src = store.put_source(b"e")
     c = Claim(id="real", text="t", evidence=[src.id])
     store.put_claim(c)
@@ -149,6 +157,7 @@ def test_fsck_index_orphan_row(store: KBStore) -> None:
 
 
 def test_fsck_index_missing_row(store: KBStore) -> None:
+    """A claim on disk that never made it into FTS5 is reported."""
     src = store.put_source(b"e")
     c = Claim(id="unindexed", text="t", evidence=[src.id])
     store.put_claim(c)
@@ -161,6 +170,7 @@ def test_fsck_index_missing_row(store: KBStore) -> None:
 
 
 def test_fsck_index_status_drift(store: KBStore) -> None:
+    """Regression cover for #78: status on disk vs FTS5 must agree."""
     src = store.put_source(b"e")
     c = Claim(id="drifty", text="t", evidence=[src.id],
               status=ClaimStatus.STABLE)
@@ -177,6 +187,7 @@ def test_fsck_index_status_drift(store: KBStore) -> None:
 
 
 def test_fsck_orphan_embedding(store: KBStore) -> None:
+    """An embedding row for a kind/id with no artifact on disk is flagged."""
     src = store.put_source(b"e")
     c = Claim(id="real", text="t", evidence=[src.id])
     store.put_claim(c)
@@ -189,6 +200,7 @@ def test_fsck_orphan_embedding(store: KBStore) -> None:
 
 
 def test_fsck_without_state_db_reports_info(store: KBStore) -> None:
+    """No state.db → info-level `index_missing`, report stays ok."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="c1", text="t", evidence=[src.id]))
     # The embedding write-hook may auto-create state.db on put_claim; this

@@ -176,6 +176,12 @@ def fsck(store: KBStore) -> HealthReport:
 def _check_lifecycle_chains(
     claims: dict[str, Claim], findings: list[Finding],
 ) -> None:
+    """Detect supersede / contradict pointers into the void or out-of-sync.
+
+    Each claim records its lifecycle links inline (`supersedes`,
+    `superseded_by`, `contradicts`). Those lists can drift if a referenced
+    claim was deleted or if a `contradict` was only written from one side.
+    """
     for cid, c in claims.items():
         for target in c.supersedes:
             if target not in claims:
@@ -214,6 +220,12 @@ def _check_decided_proposals(
     entities: dict[str, Entity],
     findings: list[Finding],
 ) -> None:
+    """Every approved proposal should have its artifact on disk.
+
+    A crash between `put_<kind>()` and `move_proposal_to_decided()` would
+    leave a `decided/` entry without a matching artifact (or vice versa);
+    surface the artifact-missing case so an operator can investigate.
+    """
     relations = {r.id for r in store.list_relations()}
     presence: dict[ProposalKind, set[str]] = {
         ProposalKind.CLAIM: set(claims),
@@ -246,6 +258,13 @@ def _check_index_drift(
     entities: dict[str, Entity],
     findings: list[Finding],
 ) -> None:
+    """FTS5 must match disk for every searchable artifact.
+
+    Three drift shapes matter: an indexed row whose artifact is gone, an
+    artifact missing from the index entirely (write-hook failure), and a
+    `claims_fts.status` value that disagrees with the on-disk
+    `claim.status` (the #78 failure mode that leaks archived claims).
+    """
     with index_db.open_db(store.kb_dir) as conn:
         indexed_claims = {
             (row[0], row[1]) for row in
@@ -308,6 +327,12 @@ def _check_orphan_embeddings(
     entities: dict[str, Entity],
     findings: list[Finding],
 ) -> None:
+    """Flag embedding rows whose artifact has been deleted.
+
+    Stale vectors are silent: semantic search still returns them, snippets
+    just fall back to the bare id. Both the legacy `embeddings` table and
+    the newer `embedding_index` table are checked.
+    """
     presence = {"claim": set(claims), "page": set(pages), "entity": set(entities)}
     with index_db.open_db(store.kb_dir) as conn:
         # Two tables exist: `embeddings` (legacy) and `embedding_index`
