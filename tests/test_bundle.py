@@ -371,15 +371,14 @@ def test_import_rejects_uncited_claim(store: KBStore, tmp_path: Path) -> None:
     manifest = {
         "spec": bundle.SPEC_VERSION,
         "bundle_id": "deadbeef",
-        "files": [
-            {
-                "path": "claims/bundle-uncited.yaml",
-                "size": len(uncited_yaml),
-                "sha256": hashlib.sha256(uncited_yaml).hexdigest(),
-            }
-        ],
+        "files": [{
+            "path": "claims/bundle-uncited.yaml",
+            "size": len(uncited_yaml),
+            "sha256": hashlib.sha256(uncited_yaml).hexdigest(),
+        }],
         "counts": {},
-        "safety": {"has_proposed": False, "has_state_db": False, "has_audit_log": False},
+        "safety": {"has_proposed": False, "has_state_db": False,
+                   "has_audit_log": False},
     }
     with tarfile.open(bundle_path, "w:gz") as tar:
         info = tarfile.TarInfo("claims/bundle-uncited.yaml")
@@ -399,7 +398,9 @@ def test_import_rejects_uncited_claim(store: KBStore, tmp_path: Path) -> None:
     assert not (store.kb_dir / "claims" / "bundle-uncited.yaml").exists()
 
 
-def test_import_check_passes_when_member_matches_manifest(store: KBStore, tmp_path: Path) -> None:
+def test_import_check_passes_when_member_matches_manifest(
+    store: KBStore, tmp_path: Path
+) -> None:
     """The hash check is positive too: a member that matches manifest
     sha256 should not be reported as `hash mismatch`."""
     payload = b"text: original\n"
