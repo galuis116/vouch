@@ -133,6 +133,21 @@ _GITTENSOR_CLAIMS: list[tuple[str, str]] = [
         "Gittensor is sybil-resistant: GitHub account verification and a merged-PR "
         "requirement prevent gaming.",
     ),
+    (
+        "gittensor-repo-allowlist",
+        "Only repositories on the Gittensor allow-list count toward emissions; "
+        "adding or de-listing a repo is a maintainer policy decision.",
+    ),
+    (
+        "gittensor-issue-multiplier",
+        "Solved issues earn a scoring multiplier on top of merged-PR rewards, with "
+        "a higher multiplier when the solver is a maintainer of the repository.",
+    ),
+    (
+        "gittensor-emission-split",
+        "Gittensor emissions are split between OSS-contribution rewards and an "
+        "issue-treasury share; the split is a validator policy decision.",
+    ),
 ]
 
 

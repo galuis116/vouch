@@ -39,7 +39,14 @@ def test_seed_gittensor_creates_cited_linked_claims(store: KBStore) -> None:
     assert result.created_anything
 
     claims = store.list_claims()
-    assert len(claims) == 4
+    assert len(claims) == 7
+    # net-new policy/scoring topics seeded alongside the originals
+    claim_ids = {c.id for c in claims}
+    assert {
+        "gittensor-repo-allowlist",
+        "gittensor-issue-multiplier",
+        "gittensor-emission-split",
+    } <= claim_ids
     sid = store.list_sources()[0].id
     assert all(sid in c.evidence for c in claims)          # every claim cited
     assert all("gittensor-sn74" in c.entities for c in claims)  # linked to entity
@@ -52,7 +59,7 @@ def test_seed_gittensor_is_idempotent(store: KBStore) -> None:
 
     assert first.created_anything is True
     assert second.created_anything is False
-    assert len(store.list_claims()) == 4
+    assert len(store.list_claims()) == 7
     assert len(store.list_sources()) == 1
     assert len(store.list_entities()) == 1
 
@@ -65,7 +72,7 @@ def test_init_template_gittensor_seeds_pack(tmp_path: Path) -> None:
     assert res.exit_code == 0, res.output
     assert "gittensor template" in res.output.lower()
     store = KBStore(tmp_path)
-    assert len(store.list_claims()) == 4  # only the gittensor pack, not the starter claim
+    assert len(store.list_claims()) == 7  # only the gittensor pack, not the starter claim
 
 
 def test_init_unknown_template_clean_error(tmp_path: Path) -> None:
