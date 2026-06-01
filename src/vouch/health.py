@@ -59,6 +59,28 @@ def status(store: KBStore) -> dict[str, Any]:
     }
 
 
+def _safe_counts(store: KBStore, claim_count: int) -> dict:
+    """status()-shaped counts without strictly re-loading claims.
+
+    status() calls store.list_claims(), which re-raises on the invalid
+    YAMLs that lint/fsck deliberately surface as findings. Pass the
+    already-safely-loaded claim count so the report stays self-consistent.
+    """
+    return {
+        "kb_dir": str(store.kb_dir),
+        "claims": claim_count,
+        "pages": len(store.list_pages()),
+        "sources": len(store.list_sources()),
+        "entities": len(store.list_entities()),
+        "relations": len(store.list_relations()),
+        "evidence": len(store.list_evidence()),
+        "sessions": len(store.list_sessions()),
+        "pending_proposals": len(store.list_proposals(ProposalStatus.PENDING)),
+        "audit_events": count_events(store.kb_dir),
+        "index_present": (store.kb_dir / index_db.DB_FILENAME).exists(),
+    }
+
+
 def _load_claims_for_lint(store: KBStore) -> tuple[list[Claim], list[Finding]]:
     """Iterate `claims/*.yaml` one file at a time so a single invalid
     YAML can't crash the whole lint sweep — surface it as a finding
@@ -147,24 +169,7 @@ def lint(store: KBStore, *, stale_after_days: int = 180) -> HealthReport:
                 ))
 
     ok = not any(f.severity == "error" for f in findings)
-    # Build counts inline rather than calling status(), because status()
-    # calls store.list_claims() which is strict and would re-raise on the
-    # same invalid YAMLs we just surfaced as findings. Use the safely-
-    # loaded `claims` list so the report is self-consistent.
-    counts = {
-        "kb_dir": str(store.kb_dir),
-        "claims": len(claims),
-        "pages": len(store.list_pages()),
-        "sources": len(sources_present),
-        "entities": len(store.list_entities()),
-        "relations": len(store.list_relations()),
-        "evidence": len(evidence_present),
-        "sessions": len(store.list_sessions()),
-        "pending_proposals": len(store.list_proposals(ProposalStatus.PENDING)),
-        "audit_events": count_events(store.kb_dir),
-        "index_present": (store.kb_dir / index_db.DB_FILENAME).exists(),
-    }
-    return HealthReport(ok=ok, findings=findings, counts=counts)
+    return HealthReport(ok=ok, findings=findings, counts=_safe_counts(store, len(claims)))
 
 
 def doctor(
@@ -217,8 +222,12 @@ def fsck(store: KBStore) -> HealthReport:
 
     Read-only; report findings only. `--fix` is intentionally out of scope.
     """
-    findings: list[Finding] = []
-    claims: dict[str, Claim] = {c.id: c for c in store.list_claims()}
+    # Load claims one file at a time (like lint) so a single invalid YAML —
+    # e.g. a legacy uncited claim from before #81 — becomes an `invalid_claim`
+    # finding instead of aborting the whole check with a traceback. That bad
+    # YAML is exactly the kind of inconsistency a deep checker should surface.
+    claim_list, findings = _load_claims_for_lint(store)
+    claims: dict[str, Claim] = {c.id: c for c in claim_list}
     pages: dict[str, Page] = {p.id: p for p in store.list_pages()}
     entities: dict[str, Entity] = {e.id: e for e in store.list_entities()}
 
@@ -236,7 +245,7 @@ def fsck(store: KBStore) -> HealthReport:
         _check_orphan_embeddings(store, claims, pages, entities, findings)
 
     ok = not any(f.severity == "error" for f in findings)
-    return HealthReport(ok=ok, findings=findings, counts=status(store))
+    return HealthReport(ok=ok, findings=findings, counts=_safe_counts(store, len(claims)))
 
 
 def _check_lifecycle_chains(
@@ -342,13 +351,14 @@ def _check_index_drift(
                             conn.execute("SELECT id FROM entities_fts").fetchall()}
 
     indexed_claim_ids = {cid for cid, _ in indexed_claims}
+    _drift_findings("claim", indexed_claim_ids, set(claims), findings)
+    _drift_findings("page", indexed_pages, set(pages), findings)
+    _drift_findings("entity", indexed_entities, set(entities), findings)
+
+    # Status drift is claim-specific: claims_fts carries a status column that
+    # must agree with the on-disk claim (orphans are already reported above).
     for cid, status_in_index in indexed_claims:
         if cid not in claims:
-            findings.append(Finding(
-                "error", "index_orphan_claim",
-                f"claims_fts row {cid} has no claim on disk",
-                [cid],
-            ))
             continue
         on_disk = claims[cid].status.value
         if status_in_index != on_disk:
@@ -358,31 +368,28 @@ def _check_index_drift(
                 f"claims_fts has {status_in_index!r}",
                 [cid],
             ))
-    for cid in claims.keys() - indexed_claim_ids:
+
+
+def _drift_findings(
+    kind: str, indexed_ids: set[str], on_disk_ids: set[str],
+    findings: list[Finding],
+) -> None:
+    """Emit the orphan + missing-row findings for one indexed kind.
+
+    `index_orphan_<kind>` = an FTS5 row whose artifact is gone from disk;
+    `index_missing_row` = a durable artifact with no FTS5 row. The shape is
+    identical for claims, pages, and entities, so a new kind is a one-liner.
+    The FTS5 table is `{kind}s_fts` for every kind.
+    """
+    for oid in indexed_ids - on_disk_ids:
+        findings.append(Finding(
+            "error", f"index_orphan_{kind}",
+            f"{kind}s_fts row {oid} has no {kind} on disk", [oid],
+        ))
+    for oid in on_disk_ids - indexed_ids:
         findings.append(Finding(
             "error", "index_missing_row",
-            f"claim {cid} on disk but missing from claims_fts",
-            [cid],
-        ))
-    for pid in indexed_pages - pages.keys():
-        findings.append(Finding(
-            "error", "index_orphan_page",
-            f"pages_fts row {pid} has no page on disk", [pid],
-        ))
-    for pid in pages.keys() - indexed_pages:
-        findings.append(Finding(
-            "error", "index_missing_row",
-            f"page {pid} on disk but missing from pages_fts", [pid],
-        ))
-    for eid in indexed_entities - entities.keys():
-        findings.append(Finding(
-            "error", "index_orphan_entity",
-            f"entities_fts row {eid} has no entity on disk", [eid],
-        ))
-    for eid in entities.keys() - indexed_entities:
-        findings.append(Finding(
-            "error", "index_missing_row",
-            f"entity {eid} on disk but missing from entities_fts", [eid],
+            f"{kind} {oid} on disk but missing from {kind}s_fts", [oid],
         ))
 
 

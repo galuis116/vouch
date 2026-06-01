@@ -242,6 +242,40 @@ def test_fsck_orphan_embedding(store: KBStore) -> None:
     assert "orphan_embedding" in codes
 
 
+def test_fsck_surfaces_invalid_claim_yaml_without_crashing(
+    store: KBStore,
+) -> None:
+    """fsck opens by loading every claim; a single invalid YAML (e.g. a
+    legacy uncited claim from before #81) must become an `invalid_claim`
+    finding rather than aborting the deep check with a traceback — that
+    bad YAML is exactly the inconsistency fsck should surface. Reuses the
+    same per-file loader as lint."""
+    src = store.put_source(b"e")
+    good = Claim(id="good", text="t", evidence=[src.id])
+    store.put_claim(good)
+    _index_claim(store, good)
+
+    legacy_uncited = (
+        "id: legacy\n"
+        'text: "shipped before the validator existed"\n'
+        "type: fact\n"
+        "status: stable\n"
+        "confidence: 1.0\n"
+        "evidence: []\n"
+    )
+    (store.kb_dir / "claims" / "legacy.yaml").write_text(legacy_uncited)
+
+    report = health.fsck(store)  # must not raise
+    codes = {f.code for f in report.findings}
+    assert "invalid_claim" in codes, [f.message for f in report.findings]
+    invalid = next(f for f in report.findings if f.code == "invalid_claim")
+    assert "legacy" in invalid.object_ids
+    assert report.ok is False  # invalid_claim is severity=error
+    # counts reflect only the safely-loaded claim — building them didn't
+    # re-trip the strict loader on the bad YAML.
+    assert report.counts["claims"] == 1
+
+
 def test_fsck_without_state_db_reports_info(store: KBStore) -> None:
     """No state.db → info-level `index_missing`, report stays ok."""
     src = store.put_source(b"e")
