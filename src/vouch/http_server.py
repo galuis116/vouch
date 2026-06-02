@@ -38,6 +38,9 @@ class _VouchHTTPServer(ThreadingHTTPServer):
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "vouch-http/0.1"
+    # Bound the read window per request so a slow / drip-feed client can't
+    # park a worker thread forever. Matters more once --allow-public is on.
+    timeout = 30
 
     # --- helpers ----------------------------------------------------------
 
@@ -84,6 +87,12 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             self._error(400, "invalid_request", "bad Content-Length")
+            return
+        if length < 0:
+            # int() happily accepts "-1"; without this guard `rfile.read(-1)`
+            # would read until EOF — unbounded body even with MAX_BODY_BYTES
+            # set, since the size check below only catches positive overruns.
+            self._error(400, "invalid_request", "Content-Length cannot be negative")
             return
         if length > MAX_BODY_BYTES:
             self._error(413, "invalid_request", "request body too large")

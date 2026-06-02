@@ -186,3 +186,41 @@ def test_run_http_rejects_public_bind_fast() -> None:
     # run_http surfaces the same guard before binding anything.
     with pytest.raises(RuntimeError, match="non-loopback"):
         run_http("0.0.0.0", 0)
+
+
+# --- malformed Content-Length protection ----------------------------------
+
+
+def test_negative_content_length_rejected(base_url: str) -> None:
+    """Raw request — urllib won't reliably forward a negative Content-Length.
+
+    Without the explicit guard, int("-1") succeeds and rfile.read(-1) reads
+    until EOF, defeating MAX_BODY_BYTES. The server must respond with a 400
+    invalid_request instead.
+    """
+    import socket
+
+    host, _, port_s = base_url.removeprefix("http://").partition(":")
+    port = int(port_s)
+    raw_request = (
+        b"POST /rpc HTTP/1.1\r\n"
+        b"Host: " + host.encode() + b"\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: -1\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    with socket.create_connection((host, port), timeout=5) as sock:
+        sock.sendall(raw_request)
+        response = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+
+    head, _, body = response.partition(b"\r\n\r\n")
+    assert b" 400 " in head.split(b"\r\n", 1)[0], head
+    payload = json.loads(body)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_request"
+    assert "negative" in payload["error"]["message"].lower()
