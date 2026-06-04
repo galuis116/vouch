@@ -27,6 +27,7 @@ from . import lifecycle as life
 from . import migrations as migrations_mod
 from . import pr_cache as prc_mod
 from . import sessions as sess_mod
+from . import stats as stats_mod
 from . import sync as sync_mod
 from . import vault_sync as vault_sync_mod
 from . import verify as verify_mod
@@ -257,6 +258,60 @@ def status(as_json: bool) -> None:
     )
     _echo(f"  audit:   {_style(str(s['audit_events']), fg='cyan')} events  •  "
           f"index: {index_str}")
+
+
+@cli.command()
+@click.option(
+    "--days",
+    default=30,
+    show_default=True,
+    type=int,
+    help="Review decision window (days). Use 0 for all-time.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON instead of a table.")
+def stats(days: int, as_json: bool) -> None:
+    """KB observability: pending queue, review rates, citation coverage."""
+    store = _load_store()
+    since = None if days == 0 else days
+    body = stats_mod.collect_stats(store, since_days=since)
+    if as_json:
+        _emit_json(body)
+        return
+    _echo(f"KB at {_style(str(body['kb_dir']), bold=True)}")
+    pending = body["pending"]
+    _echo(
+        f"  pending: {_style(str(pending['total']), fg='yellow' if pending['total'] else 'green')} "
+        f"proposal(s)"
+    )
+    if pending["by_agent"]:
+        for agent, count in pending["by_agent"].items():
+            _echo(f"    {agent}: {count}")
+    age = pending["age_days"]
+    if age["median"] is not None:
+        _echo(
+            f"  pending age (days): median {age['median']}, max {age['max']}"
+            + (f" ({age['oldest_id']})" if age["oldest_id"] else "")
+        )
+    review = body["review"]
+    window = "all time" if review["window_days"] is None else f"last {review['window_days']}d"
+    _echo(f"  review ({window}): "
+          f"{review['approved']} approved, {review['rejected']} rejected, "
+          f"{review['expired']} expired")
+    rate = review["approval_rate"]
+    if rate is not None:
+        _echo(f"  approval rate: {_style(f'{rate * 100:.1f}%', fg='cyan')}")
+    cites = body["citations"]
+    cov = cites["coverage_rate"]
+    cov_str = f"{cov * 100:.1f}%" if cov is not None else "n/a"
+    _echo(
+        f"  citations: {cites['claims_with_valid_citation']}/{cites['claims_total']} "
+        f"claims with valid citations ({cov_str})"
+    )
+    if cites["invalid_claim"] or cites["broken_citation"]:
+        _echo(
+            f"    invalid: {cites['invalid_claim']}, "
+            f"broken: {cites['broken_citation']}"
+        )
 
 
 def _findings_json(report) -> list[dict[str, Any]]:

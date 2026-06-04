@@ -79,11 +79,17 @@ Two agents will eventually disagree. What it looks like:
 ## Tracking who's busy
 
 ```bash
+vouch stats              # pending by agent, review rates, citation coverage
+vouch stats --json       # same, for dashboards / CI
+```
+
+Or, if you only need the queue breakdown:
+
+```bash
 vouch pending --json | jq -r '.[] | "\(.proposed_by)\t\(.id)"' | sort | uniq -c
 ```
 
-Tells you which agent has the most pending work. Useful when one
-agent has been spammy or is asleep at the wheel.
+Useful when one agent has been spammy or is asleep at the wheel.
 
 ## Crystallisation per agent
 

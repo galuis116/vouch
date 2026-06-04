@@ -23,6 +23,7 @@ from . import sessions as sess_mod
 from . import verify as verify_mod
 from .capabilities import capabilities as build_caps
 from .context import build_context_pack
+from .stats import collect_stats
 from .logging_config import configure_logging
 from .models import ProposalStatus
 from .proposals import (
@@ -72,6 +73,16 @@ def kb_capabilities() -> dict[str, Any]:
 def kb_status() -> dict[str, Any]:
     """Return KB artifact counts and health summary."""
     return health.status(_store())
+
+
+@mcp.tool()
+def kb_stats(*, days: int = 30) -> dict[str, Any]:
+    """Observability: pending by agent, review rates, citation coverage.
+
+    days: decision window in days; 0 means all-time.
+    """
+    since = None if days == 0 else days
+    return collect_stats(_store(), since_days=since)
 
 
 # === read tools (unrestricted) ============================================

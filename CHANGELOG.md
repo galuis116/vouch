@@ -32,6 +32,11 @@ All notable changes to vouch are documented here. Format follows
   non-blocking `warnings` (`similar_approved`, `similar_pending`) when the
   embeddings extra is installed. Configurable via `review.similarity_threshold`
   (default `0.95`). CLI prints warnings to stderr; dry-run included.
+- `vouch stats` and `kb.stats` expose read-only KB observability: pending
+  proposals by agent (with median/max age), review decision counts and
+  approval rate over a configurable window (`--days`, default 30; `0` for
+  all-time), citation coverage (valid / invalid / broken), plus audit-log
+  cross-check totals. Available on MCP, JSONL, and HTTP transports.
 - `vouch fsck` performs deep consistency checks beyond `vouch doctor`:
   orphaned embeddings, dangling supersede/contradict chains, decided
   proposals whose artifact is missing, and FTS5 index-vs-file drift

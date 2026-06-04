@@ -16,6 +16,7 @@ from .models import Capabilities
 METHODS = [
     "kb.capabilities",
     "kb.status",
+    "kb.stats",
     "kb.search",
     "kb.context",
     "kb.read_page",

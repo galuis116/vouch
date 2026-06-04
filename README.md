@@ -143,6 +143,7 @@ vouch init                                  # set up .vouch/ at PATH
 vouch discover [--path P]                   # find the nearest .vouch/ root
 vouch capabilities                          # emit the JSON capabilities descriptor
 vouch status [--json]                       # KB counts + pending proposals
+vouch stats [--days N] [--json]             # observability: queue, review rates, citations
 vouch lint [--stale-days N]                 # user-actionable problems
 vouch doctor                                # full sweep incl. source verification
 vouch fsck                                  # deep consistency: indexes, lifecycle, decided
