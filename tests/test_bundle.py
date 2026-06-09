@@ -411,6 +411,49 @@ def test_import_check_passes_when_member_matches_manifest(
     assert not any("hash mismatch" in i for i in diff.issues), diff.issues
 
 
+# --- graph integrity on the bundle path ----------------------------------
+#
+# `import_apply` writes member bytes directly to disk and never goes
+# through `put_relation` / `put_page`, so the storage-layer validators
+# can't reach this surface. `_check_graph_integrity` is the bundle's
+# equivalent gate: every Relation / Page reference must resolve against
+# the post-merge id set (destination KB plus incoming bundle).
+
+
+def _write_multi_member_bundle(
+    bundle_path: Path, members: dict[str, bytes]
+) -> None:
+    """Build a manifest-consistent bundle with the given member bodies."""
+    files = [
+        {
+            "path": name,
+            "size": len(body),
+            "sha256": hashlib.sha256(body).hexdigest(),
+        }
+        for name, body in members.items()
+    ]
+    bundle_id = hashlib.sha256(
+        b"".join(sorted(f["sha256"].encode() for f in files))
+    ).hexdigest()
+    manifest = {
+        "spec": bundle.SPEC_VERSION,
+        "bundle_id": bundle_id,
+        "files": files,
+        "counts": {},
+        "safety": {"has_proposed": False, "has_state_db": False,
+                   "has_audit_log": False},
+    }
+    with tarfile.open(bundle_path, "w:gz") as tar:
+        for name, body in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+        mf_bytes = json.dumps(manifest).encode()
+        mf_info = tarfile.TarInfo(bundle.MANIFEST_NAME)
+        mf_info.size = len(mf_bytes)
+        tar.addfile(mf_info, io.BytesIO(mf_bytes))
+
+
 # --- source content-addressing on the bundle path ------------------------
 #
 # A Source's id is the sha256 of its content (README: "content-addressed
@@ -470,6 +513,138 @@ def _write_source_bundle(
         mf_info = tarfile.TarInfo(bundle.MANIFEST_NAME)
         mf_info.size = len(mf_bytes)
         tar.addfile(mf_info, io.BytesIO(mf_bytes))
+
+
+def _relation_yaml(rid: str, source: str, target: str, evidence: list[str]) -> bytes:
+    import yaml as _yaml
+    return _yaml.safe_dump({
+        "id": rid, "source": source, "relation": "uses",
+        "target": target, "confidence": 0.7, "evidence": evidence,
+        "created_at": "2026-05-27T00:00:00+00:00",
+        "updated_at": "2026-05-27T00:00:00+00:00",
+    }, sort_keys=False).encode()
+
+
+def _page_md(pid: str, entities: list[str], sources: list[str]) -> bytes:
+    import yaml as _yaml
+    meta = {
+        "id": pid, "title": pid, "type": "concept", "status": "draft",
+        "claims": [], "entities": entities, "sources": sources, "tags": [],
+        "created_at": "2026-05-27T00:00:00+00:00",
+        "updated_at": "2026-05-27T00:00:00+00:00",
+    }
+    return f"---\n{_yaml.safe_dump(meta, sort_keys=False)}---\nbody".encode()
+
+
+def test_import_check_rejects_relation_with_dangling_endpoints(
+    store: KBStore, tmp_path: Path
+) -> None:
+    """A bundle that ships a relation whose source / target are absent
+    from both the bundle and the destination is rejected — the bundle
+    integrity story extends from per-file sha256 (#74) to referential
+    integrity of the graph it carries."""
+    bundle_path = tmp_path / "evil-rel.tar.gz"
+    _write_multi_member_bundle(bundle_path, {
+        "relations/r-dangling.yaml": _relation_yaml(
+            "r-dangling", "ghost-source", "ghost-target", [],
+        ),
+    })
+
+    diff = bundle.import_check(store.kb_dir, bundle_path)
+    assert not diff.ok
+    assert any("dangling reference" in i and "source" in i for i in diff.issues)
+    assert any("dangling reference" in i and "target" in i for i in diff.issues)
+
+
+def test_import_apply_refuses_dangling_relation_endpoints(
+    store: KBStore, tmp_path: Path
+) -> None:
+    bundle_path = tmp_path / "evil-rel.tar.gz"
+    _write_multi_member_bundle(bundle_path, {
+        "relations/r-dangling.yaml": _relation_yaml(
+            "r-dangling", "ghost", "ghost2", [],
+        ),
+    })
+
+    with pytest.raises(RuntimeError, match="dangling reference"):
+        bundle.import_apply(store.kb_dir, bundle_path)
+    assert not (store.kb_dir / "relations" / "r-dangling.yaml").exists()
+
+
+def test_import_check_rejects_page_with_dangling_refs(
+    store: KBStore, tmp_path: Path
+) -> None:
+    bundle_path = tmp_path / "evil-page.tar.gz"
+    _write_multi_member_bundle(bundle_path, {
+        "pages/evil-page.md": _page_md(
+            "evil-page",
+            entities=["ghost-entity"],
+            sources=["ghost-source"],
+        ),
+    })
+
+    diff = bundle.import_check(store.kb_dir, bundle_path)
+    assert not diff.ok
+    assert any("dangling reference" in i and "page entity" in i for i in diff.issues)
+    assert any("dangling reference" in i and "page source" in i for i in diff.issues)
+
+    with pytest.raises(RuntimeError, match="dangling reference"):
+        bundle.import_apply(store.kb_dir, bundle_path)
+    assert not (store.kb_dir / "pages" / "evil-page.md").exists()
+
+
+def test_import_check_accepts_self_contained_bundle(
+    store: KBStore, tmp_path: Path
+) -> None:
+    """A bundle that ships an entity alongside the relation that points
+    at it imports cleanly. The post-merge id set is the union of
+    destination + incoming, so a self-contained bundle does not get
+    penalised for not having its dependencies already on disk."""
+    import yaml as _yaml
+    ent_yaml = _yaml.safe_dump({
+        "id": "ent-x", "name": "X", "type": "project",
+        "aliases": [], "description": None, "page": None,
+        "created_at": "2026-05-27T00:00:00+00:00",
+        "updated_at": "2026-05-27T00:00:00+00:00",
+    }, sort_keys=False).encode()
+    ent2_yaml = _yaml.safe_dump({
+        "id": "ent-y", "name": "Y", "type": "project",
+        "aliases": [], "description": None, "page": None,
+        "created_at": "2026-05-27T00:00:00+00:00",
+        "updated_at": "2026-05-27T00:00:00+00:00",
+    }, sort_keys=False).encode()
+    bundle_path = tmp_path / "self-contained.tar.gz"
+    _write_multi_member_bundle(bundle_path, {
+        "entities/ent-x.yaml": ent_yaml,
+        "entities/ent-y.yaml": ent2_yaml,
+        "relations/ent-x--uses--ent-y.yaml": _relation_yaml(
+            "ent-x--uses--ent-y", "ent-x", "ent-y", [],
+        ),
+    })
+
+    diff = bundle.import_check(store.kb_dir, bundle_path)
+    assert diff.ok, diff.issues
+    result = bundle.import_apply(store.kb_dir, bundle_path)
+    assert "relations/ent-x--uses--ent-y.yaml" in result["written"]
+
+
+def test_import_check_resolves_refs_against_destination_kb(
+    store: KBStore, tmp_path: Path
+) -> None:
+    """If the destination already has the entity, a bundle shipping just
+    the relation imports cleanly."""
+    from vouch.models import Entity, EntityType
+    store.put_entity(Entity(id="local-a", name="A", type=EntityType.PROJECT))
+    store.put_entity(Entity(id="local-b", name="B", type=EntityType.PROJECT))
+    bundle_path = tmp_path / "rel-only.tar.gz"
+    _write_multi_member_bundle(bundle_path, {
+        "relations/local-a--uses--local-b.yaml": _relation_yaml(
+            "local-a--uses--local-b", "local-a", "local-b", [],
+        ),
+    })
+
+    diff = bundle.import_check(store.kb_dir, bundle_path)
+    assert diff.ok, diff.issues
 
 
 def test_import_rejects_source_content_address_mismatch(
