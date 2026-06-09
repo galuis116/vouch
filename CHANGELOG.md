@@ -7,6 +7,17 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- `vouch install-mcp <host>` — one-command adapter writer that drops the
+  right MCP config templates into a project tree, idempotently. Eight hosts
+  ship in the catalogue: `claude-code`, `claude-desktop`, `cursor`,
+  `continue`, `codex`, `windsurf`, `cline`, `zed`. Each adapter is described
+  by a declarative `adapters/<host>/install.yaml` manifest so adding a new
+  host is a single-file PR. `--tier T1..T4` stacks adoption layers (T1 = MCP
+  wire only, T2 = CLAUDE.md/AGENTS.md fenced snippet, T3 = optional slash
+  commands, T4 = optional host hooks/settings). `--list` enumerates the
+  catalogue; `--path` (or `--target`) installs into a project other than
+  cwd. Existing files are left alone; CLAUDE.md gets a fenced append so
+  re-runs stay flat-noop (#179).
 - Propose-time similarity warnings: `propose_claim` / `kb.propose_claim` return
   non-blocking `warnings` (`similar_approved`, `similar_pending`) when the
   embeddings extra is installed. Configurable via `review.similarity_threshold`

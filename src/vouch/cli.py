@@ -22,6 +22,7 @@ import yaml
 
 from . import __version__, bundle, health
 from . import audit as audit_mod
+from . import install_adapter as install_mod
 from . import lifecycle as life
 from . import migrations as migrations_mod
 from . import pr_cache as prc_mod
@@ -1494,6 +1495,73 @@ def pr_cache_show(repo: str, state: str, limit: int, as_json: bool,
             click.echo(f"      reason: {r.close_analysis.reason}")
             for nrep in r.close_analysis.do_not_repeat[:3]:
                 click.echo(f"      ✗ avoid: {nrep}")
+
+
+# --- install-mcp: drop the right adapter files into a project tree --------
+
+
+@cli.command(name="install-mcp",
+             context_settings={"ignore_unknown_options": False})
+@click.argument("host", required=False)
+@click.option("--list", "list_hosts", is_flag=True,
+              help="List available hosts and exit.")
+@click.option("--path", default=".", show_default=True,
+              type=click.Path(file_okay=False),
+              help="Target project root.")
+@click.option("--target", "target_alias", default=None,
+              type=click.Path(file_okay=False),
+              help="Alias for --path (per issue #179 spec).")
+@click.option("--tier", default="T4", show_default=True,
+              type=click.Choice(["T1", "T2", "T3", "T4"]),
+              help="Adoption tier: T1 = MCP wire only, "
+                   "T2 = +CLAUDE.md/AGENTS.md, T3 = +slash commands, "
+                   "T4 = +host hooks/settings. Tiers stack.")
+def install_mcp(host: str | None, list_hosts: bool, path: str,
+                target_alias: str | None, tier: str) -> None:
+    """Install vouch into HOST (claude-code, cursor, …) idempotently.
+
+    \b
+    Examples:
+      vouch install-mcp --list              # show known hosts
+      vouch install-mcp claude-code         # write T1..T4 into cwd
+      vouch install-mcp cursor --tier T2    # stop at AGENTS.md
+      vouch install-mcp claude-desktop      # drop a paste-ready config
+      vouch install-mcp windsurf --path /abs/path/to/project
+    """
+    hosts = install_mod.available_adapters()
+    if list_hosts:
+        if not hosts:
+            click.echo("(no adapters installed alongside this vouch install)")
+            return
+        click.echo("Available MCP host adapters:")
+        for h in hosts:
+            click.echo(f"  - {h}")
+        click.echo("")
+        click.echo("Install one with: vouch install-mcp <host> [--tier T1|T2|T3|T4]")
+        return
+
+    if host is None:
+        raise click.ClickException(
+            "missing HOST; run `vouch install-mcp --list` to see the catalogue"
+        )
+
+    target = Path(target_alias or path).resolve()
+    try:
+        result = install_mod.install(host, target=target, tier=tier)
+    except install_mod.AdapterError as e:
+        raise click.ClickException(str(e)) from e
+
+    for f in result.written:
+        click.echo(f"  + {f}")
+    for f in result.appended:
+        click.echo(f"  ~ {f}  (appended fenced block)")
+    for f in result.skipped:
+        click.echo(f"  · {f}  (already present)")
+    click.echo(
+        f"Done — {len(result.written)} written, "
+        f"{len(result.appended)} appended, {len(result.skipped)} skipped "
+        f"under {target}"
+    )
 
 
 if __name__ == "__main__":
