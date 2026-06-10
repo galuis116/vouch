@@ -134,7 +134,7 @@ half-written file.)
 
 Example exposition:
 
-```
+```text
 # HELP vouch_approval_rate approve / (approve + reject) over window.
 # TYPE vouch_approval_rate gauge
 vouch_approval_rate 0.75
