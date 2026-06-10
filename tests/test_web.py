@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from fastapi.testclient import TestClient
 
 from vouch import audit as audit_mod
 from vouch.cli import cli
@@ -27,6 +26,12 @@ from vouch.models import ProposalStatus
 from vouch.proposals import propose_claim
 from vouch.storage import KBStore
 from vouch.web import create_app
+
+# The web surface lives behind the [web] extra. Skip the whole module cleanly
+# when it isn't installed (CI installs `.[dev,web]`, so it runs there).
+pytest.importorskip("fastapi", reason="vouch review-ui needs the [web] extra")
+
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -80,8 +85,11 @@ def test_api_pending_json(client: TestClient, store: KBStore) -> None:
     r = client.get("/api/pending")
     assert r.status_code == 200
     body = r.json()
-    assert any(item["id"] == pid for item in body)
-    assert body[0]["proposed_by"] == "agent-A"
+    # Full-spec shape: paginated envelope {count, page, pages, items}.
+    assert body["count"] == 1
+    items = body["items"]
+    assert any(item["id"] == pid for item in items)
+    assert items[0]["proposed_by"] == "agent-A"
 
 
 # --- claim detail --------------------------------------------------------
@@ -245,10 +253,12 @@ def test_create_app_errors_without_vouch_dir(tmp_path: Path) -> None:
         create_app(str(bare))
 
 
-# --- CLI: `review-ui --bind 0.0.0.0:...` is refused in the MVP -----------
+# --- CLI: non-loopback bind requires --auth -------------------------------
 
 
-def test_cli_review_ui_refuses_non_localhost_bind(tmp_path: Path) -> None:
+def test_cli_review_ui_refuses_non_localhost_bind_without_auth(tmp_path: Path) -> None:
+    """A non-loopback bind with no --auth is refused — we won't expose an
+    unauthenticated approve surface on the network."""
     runner = CliRunner()
     KBStore.init(tmp_path)
     result = runner.invoke(
@@ -257,4 +267,5 @@ def test_cli_review_ui_refuses_non_localhost_bind(tmp_path: Path) -> None:
          "--kb", str(tmp_path)],
     )
     assert result.exit_code != 0
-    assert "localhost" in result.output.lower()
+    assert "--auth" in result.output
+    assert "non-loopback" in result.output.lower()

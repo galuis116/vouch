@@ -787,23 +787,64 @@ def serve(transport: str) -> None:
 # --- review-ui: browser-based review console -----------------------------
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
+
+
+def _resolve_auth_token(auth: str | None) -> str | None:
+    """Turn the ``--auth`` option into a concrete token (or ``None``).
+
+    * ``None``          -> no auth (only allowed on a loopback bind).
+    * ``"generate"``    -> mint a random token and print it once.
+    * ``"env"``         -> read ``VOUCH_REVIEW_TOKEN`` from the environment.
+    * any other string  -> use it verbatim as the bearer token.
+    """
+    if auth is None:
+        return None
+    if auth == "generate":
+        import secrets
+        token = secrets.token_urlsafe(24)
+        click.echo(f"Generated review token: {token}")
+        return token
+    if auth == "env":
+        env_token = os.environ.get("VOUCH_REVIEW_TOKEN")
+        if not env_token:
+            raise click.ClickException(
+                "--auth env: VOUCH_REVIEW_TOKEN is not set in the environment"
+            )
+        return env_token
+    return auth
+
+
 @cli.command(name="review-ui")
 @click.option("--bind", "bind", default="127.0.0.1:7780", show_default=True,
-              help="host:port to bind. Refuses 0.0.0.0 in this MVP slice "
-                   "(auth lands with the HTTP-transport feature).")
+              help="host:port to bind. A non-loopback host (e.g. 0.0.0.0) "
+                   "requires --auth so the approve surface isn't exposed "
+                   "unauthenticated.")
+@click.option("--auth", default=None,
+              help="Bearer-token mode: a literal token, 'generate' (mint a "
+                   "random one and print it), or 'env' (read "
+                   "VOUCH_REVIEW_TOKEN). Required for non-loopback binds.")
+@click.option("--reviewer", "reviewer", default="web-reviewer", show_default=True,
+              help="Identity recorded in the audit log for token-authed "
+                   "approve/reject decisions.")
+@click.option("--page-size", default=None, type=int,
+              help="Queue page size (server-side pagination).")
 @click.option("--kb", "kb_root", default=None,
               type=click.Path(exists=True, file_okay=False),
               help="KB root (defaults to the nearest .vouch/ above cwd).")
 @click.option("--open-browser/--no-open-browser", default=True, show_default=True,
               help="Open the browser to the queue on startup.")
-def review_ui(bind: str, kb_root: str | None, open_browser: bool) -> None:
-    """Run the browser-based review console.
+def review_ui(bind: str, auth: str | None, reviewer: str, page_size: int | None,
+              kb_root: str | None, open_browser: bool) -> None:
+    """Run the browser-based review console (issue #194).
 
     \b
     Examples:
-      vouch review-ui                     # bind 127.0.0.1:7780, open browser
+      vouch review-ui                              # 127.0.0.1:7780, open browser
       vouch review-ui --bind 127.0.0.1:8000
-      vouch review-ui --no-open-browser   # ssh / headless friendly
+      vouch review-ui --no-open-browser            # ssh / headless friendly
+      vouch review-ui --bind 0.0.0.0:7780 --auth generate   # team mode
+      VOUCH_REVIEW_TOKEN=… vouch review-ui --bind 0.0.0.0:7780 --auth env
     """
     if ":" not in bind:
         raise click.ClickException(
@@ -815,16 +856,17 @@ def review_ui(bind: str, kb_root: str | None, open_browser: bool) -> None:
     except ValueError as e:
         raise click.ClickException(f"invalid port in --bind: {port_str!r}") from e
 
-    # The full design (issue #194) refuses 0.0.0.0 without --auth bearer.
-    # The MVP slice does not ship the Bearer-auth layer yet (depends on
-    # the HTTP-transport feature), so we refuse non-localhost binds
-    # outright — a clearer error than silently exposing an unauthenticated
-    # approve surface on the network.
-    if host not in ("127.0.0.1", "localhost", "::1"):
+    token = _resolve_auth_token(auth)
+
+    # Refuse a non-loopback bind without a bearer token — exposing an
+    # unauthenticated approve surface on the network would let anyone on the
+    # LAN mutate the KB. Same posture as the HTTP transport (#1).
+    is_loopback = host in _LOOPBACK_HOSTS
+    if not is_loopback and token is None:
         raise click.ClickException(
-            f"--bind {bind!r}: review-ui is localhost-only in the MVP slice. "
-            "Bearer-auth + non-loopback binding land alongside the HTTP "
-            "transport feature."
+            f"--bind {bind!r} is non-loopback; pass --auth (a token, "
+            "'generate', or 'env') so the approve surface requires a "
+            "Bearer token. Refusing to expose an unauthenticated gate."
         )
 
     try:
@@ -833,7 +875,9 @@ def review_ui(bind: str, kb_root: str | None, open_browser: bool) -> None:
         raise click.ClickException(str(e)) from e
 
     try:
-        app = web_pkg.create_app(kb_root)
+        app = web_pkg.create_app(
+            kb_root, auth_token=token, auth_label=reviewer, page_size=page_size
+        )
     except (FileNotFoundError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
 
@@ -845,17 +889,20 @@ def review_ui(bind: str, kb_root: str | None, open_browser: bool) -> None:
             "Install with: pip install 'vouch-kb[web]'"
         ) from e
 
-    if open_browser:
+    auth_note = " (Bearer auth on)" if token else ""
+    if open_browser and is_loopback:
         # Lazy-import webbrowser; some CI envs (headless) don't have a default
         # browser configured and webbrowser.open() returns False rather than
-        # raising — that's fine, the URL is also printed to stdout.
+        # raising — that's fine, the URL is also printed to stdout. When auth
+        # is on, hand the browser the token once via ?token= so it can stash it.
         import threading
         import webbrowser
-        url = f"http://{host}:{port}/"
-        click.echo(f"vouch review-ui running at {url}")
+        suffix = f"?token={token}" if token else ""
+        url = f"http://{host}:{port}/{suffix}"
+        click.echo(f"vouch review-ui running at http://{host}:{port}/{auth_note}")
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     else:
-        click.echo(f"vouch review-ui running at http://{host}:{port}/")
+        click.echo(f"vouch review-ui running at http://{host}:{port}/{auth_note}")
 
     uvicorn.run(app, host=host, port=port, log_level="info")
 

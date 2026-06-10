@@ -1,8 +1,9 @@
 """Browser-based review console for vouch.
 
 The web layer is a *viewport* over the existing kb.* surface — every action
-(approve, reject) goes through the same ``vouch.proposals`` / ``vouch.storage``
-code path as the CLI, so the audit log is identical regardless of surface.
+(approve, reject, contradict) goes through the same ``vouch.proposals`` /
+``vouch.lifecycle`` / ``vouch.storage`` code path as the CLI, so the audit log
+is identical regardless of surface.
 
 The dependencies (fastapi, jinja2) live behind the ``[web]`` extra so the
 base install stays light. ``vouch review-ui`` produces an actionable
@@ -31,12 +32,28 @@ def _require_web_extra() -> None:
         )
 
 
-def create_app(kb_root: str | None = None):  # type: ignore[no-untyped-def]
-    """Build the FastAPI app for a given KB root. Lazy-imports the web stack."""
-    _require_web_extra()
-    from .server import build_app
+def create_app(  # type: ignore[no-untyped-def]
+    kb_root: str | None = None,
+    *,
+    auth_token: str | None = None,
+    auth_label: str = "web-reviewer",
+    page_size: int | None = None,
+):
+    """Build the FastAPI app for a given KB root. Lazy-imports the web stack.
 
-    return build_app(kb_root)
+    ``auth_token`` enables the Bearer gate (every route requires the token);
+    ``auth_label`` is the reviewer identity recorded in the audit log for
+    token-authenticated actions. ``page_size`` overrides queue pagination.
+    """
+    _require_web_extra()
+    from .server import DEFAULT_PAGE_SIZE, AuthConfig, build_app
+
+    auth = AuthConfig(token=auth_token, label=auth_label)
+    return build_app(
+        kb_root,
+        auth=auth,
+        page_size=page_size if page_size is not None else DEFAULT_PAGE_SIZE,
+    )
 
 
 __all__ = ["create_app"]
