@@ -220,6 +220,31 @@ In your project's `.mcp.json`:
 
 `VOUCH_AGENT` is recorded as `proposed_by` and as the actor on every audit event, so multi-agent setups can attribute writes correctly.
 
+## Running vouch as an OpenClaw plugin
+
+Vouch ships an [OpenClaw](https://github.com/dripsmvcp/openclaw) plugin manifest at the
+repo root — [`openclaw.plugin.json`](openclaw.plugin.json). Drop the vouch repo
+into an OpenClaw deployment and the plugin loader picks it up automatically:
+the MCP server, the four slash commands (`/vouch-recall`, `/vouch-status`,
+`/vouch-resolve-issue`, `/vouch-propose-from-pr`), and the CLAUDE.md fenced
+snippet become available as one bundle.
+
+The manifest declares vouch's trust boundary explicitly — remote callers'
+filesystem access is confined, every write tool routes through the review
+gate, every lifecycle op is audit-logged. The `configSchema` exposes only
+`kb_path`, `agent`, and `transport` — no API keys, no secrets; vouch is
+local-first.
+
+```bash
+# Inside an OpenClaw deployment that vendors plugin repos:
+openclaw plugin add vouchdev/vouch
+openclaw plugin enable vouch
+```
+
+The plugin's `mcpServers.vouch` block matches the same `.mcp.json` shape
+Claude Code uses — both platforms drive the same `vouch serve` process,
+so the kb.* surface is identical regardless of host.
+
 ## JSONL request/response shape
 
 The JSONL transport reads one envelope per line on stdin, writes one per line on stdout:

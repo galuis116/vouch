@@ -160,9 +160,31 @@ about this; it's checked in PR review.
 | Sessions | `src/vouch/sessions.py` |
 | Manifest-driven adapter writer | `src/vouch/install_adapter.py` |
 | Web review-ui (when PR #195 lands) | `src/vouch/web/` |
+| OpenClaw plugin manifest | `openclaw.plugin.json` (repo root) |
+| Claude Code / Cursor / etc. install templates | `adapters/<host>/` |
 
 Tests mirror module names (`tests/test_<module>.py`); the convention is
 strict.
+
+## The OpenClaw plugin manifest
+
+[`openclaw.plugin.json`](./openclaw.plugin.json) at the repo root makes the
+vouch repo loadable directly as an OpenClaw plugin: drop the repo into a
+deployment, and the loader picks up the MCP server, the four slash commands
+under `adapters/claude-code/.claude/commands/`, and the trust-boundary
+declaration. Touch it whenever you:
+
+* bump the package version (`version` field must stay in step with
+  `pyproject.toml`),
+* add or rename a slash command (sync the `skills` array),
+* add a new MCP method that's safe to expose to remote callers (consider
+  whether to list it under `contracts.mcpMethods`),
+* change the trust boundary (e.g. a new "must-be-confined" surface that
+  arrives with the HTTP transport).
+
+Keep it small. Anything that would require a runtime decision (which kb to
+use, whose audit log to write to) belongs in the deployment's own config,
+not in the plugin manifest.
 
 ## When you add a new `kb.*` method
 

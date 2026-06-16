@@ -11,6 +11,14 @@ project**, read [`README.md`](./README.md) for install + concepts and
 [`docs/getting-started.md`](./docs/getting-started.md) for the agent-side
 loop.
 
+If you're an **OpenClaw** plugin loader, the plugin manifest is at the repo
+root: [`openclaw.plugin.json`](./openclaw.plugin.json). It declares vouch's
+MCP wiring, the four slash commands, the trust boundary (write tools
+review-gated, lifecycle ops audit-logged, remote-caller filesystem
+confined), and the config schema (`kb_path`, `agent`, `transport` — no
+secrets). No additional wiring is required to surface vouch's `kb.*`
+surface inside an OpenClaw deployment.
+
 ## What vouch is, in one paragraph
 
 Vouch is a git-native, review-gated knowledge base for LLM agents. Agents

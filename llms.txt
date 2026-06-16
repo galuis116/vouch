@@ -43,3 +43,8 @@ Repo: https://github.com/vouchdev/vouch · PyPI: `vouch-kb` · CLI: `vouch`
 ## Install
 
 - [install.sh](https://raw.githubusercontent.com/vouchdev/vouch/main/install.sh): POSIX-sh one-liner — picks a Python 3.11+, installs pipx if missing, runs `pipx install vouch-kb`, points at the Claude Code wiring step if applicable.
+
+## Host integrations
+
+- [openclaw.plugin.json](https://raw.githubusercontent.com/vouchdev/vouch/main/openclaw.plugin.json): OpenClaw plugin manifest. Declares the MCP server, the four bundled slash commands, the trust boundary (review-gated writes, audit-logged lifecycle ops, remote-caller filesystem confinement), and the config schema (`kb_path`, `agent`, `transport` — no secrets).
+- [adapters/](https://github.com/vouchdev/vouch/tree/main/adapters): One directory per supported MCP host (claude-code, claude-desktop, cline, codex, continue, cursor, windsurf, zed). Each is a single-file manifest the `vouch install-mcp <host>` writer reads.
