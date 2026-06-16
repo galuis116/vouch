@@ -268,6 +268,22 @@ def kb_to_vault(store: KBStore, vault_dir: Path) -> VaultSyncResult:
 # --- forward direction: vault -> KB ---------------------------------------
 
 
+def _has_pending_page_proposal(store: KBStore, page_id: str) -> bool:
+    """Return True if a pending proposal already targets ``page_id``.
+
+    Prevents duplicate proposals when vault_to_kb runs multiple times before
+    the reviewer approves the first proposal for a given page edit.
+    """
+    from .models import ProposalKind, ProposalStatus
+    for proposal in store.list_proposals(ProposalStatus.PENDING):
+        if proposal.kind != ProposalKind.PAGE:
+            continue
+        payload = proposal.payload
+        if isinstance(payload, dict) and payload.get("id") == page_id:
+            return True
+    return False
+
+
 def vault_to_kb(
     store: KBStore,
     vault_dir: Path,
@@ -288,6 +304,20 @@ def vault_to_kb(
         current_hash = _sha256_text(text)
         recorded = state.get(rel)
         if recorded is None:
+            # Fix 4 (#219): if the file lives under claims/ rather than
+            # pages/, the user edited a claim stub. Claim stubs are
+            # read-only mirrors — edits there are silently dropped without
+            # this guard, giving the user no feedback. Warn explicitly so
+            # the user knows to edit the underlying page instead.
+            claims_rel = f"claims/{path.name}"
+            if state.get(claims_rel) is not None:
+                log.warning(
+                    "vault sync: edit detected in claim stub %s; claim stubs "
+                    "are read-only mirrors — edit the citing page instead",
+                    claims_rel,
+                )
+                result.pages_skipped_unknown_id.append(claims_rel)
+                continue
             # Never mirrored on this side -- skip silently. We only file
             # proposals for *edits* to KB-managed pages, not arbitrary new
             # files the user dropped into the mirror dir.
@@ -315,6 +345,35 @@ def vault_to_kb(
             result.pages_skipped_unknown_id.append(rel)
             continue
 
+        # Fix 1 (#219): guard against proposing edits for pages that no
+        # longer exist in the KB. The mirror file may outlive the KB page if
+        # the page was deleted after the last backward sync; filing a proposal
+        # for a ghost page would produce an unresolvable slug on approve.
+        try:
+            store.get_page(page_id)
+        except ArtifactNotFoundError:
+            log.warning(
+                "vault sync: mirror file %s references page %r which no longer "
+                "exists in the KB; skipping to avoid a ghost proposal",
+                rel, page_id,
+            )
+            result.pages_skipped_unknown_id.append(rel)
+            continue
+
+        # Fix 2 (#219): skip if a pending proposal already targets this page
+        # id. Without this guard, running vault_to_kb twice before the first
+        # proposal is approved files duplicate proposals for the same edit,
+        # cluttering the review queue and causing the second approve to fail
+        # with "page already exists".
+        if _has_pending_page_proposal(store, page_id):
+            log.debug(
+                "vault sync: pending proposal already exists for page %r; "
+                "skipping to avoid duplicate",
+                page_id,
+            )
+            result.pages_skipped_unchanged.append(rel)
+            continue
+
         # Record the user's edit as a vault-origin source so reviewers can
         # see the exact bytes that triggered the proposal. Content-addressed
         # via sha256, so re-runs against the same bytes coalesce on the same
@@ -328,10 +387,11 @@ def vault_to_kb(
             tags=["vault", "vault-sync"],
         )
 
-        # File the page-edit proposal. The store-side validator will reject
-        # any references to artifacts the KB doesn't know about -- which is
-        # the right behaviour: the user can't introduce phantom claim ids
-        # from inside Obsidian.
+        # Fix 3 (#219): pass slug_hint=page_id so the proposal targets the
+        # existing page rather than a slugified copy of the title. Without
+        # this, a page with id "auth-decision-001" and title "Auth Decision"
+        # would produce a proposal for a new page "auth-decision", silently
+        # duplicating the KB entry on approve instead of updating it.
         propose_page(
             store,
             title=edited.title,
@@ -342,6 +402,7 @@ def vault_to_kb(
             source_ids=list({*edited.sources, source.id}),
             proposed_by=actor,
             tags=list(edited.tags),
+            slug_hint=page_id,
         )
         result.pages_proposed.append(page_id)
 
