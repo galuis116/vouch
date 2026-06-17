@@ -6,6 +6,12 @@
   <img src="docs/banner.svg" alt="vouch — propose → review → commit → retrieve" width="100%"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/vouchdev/vouch/actions/workflows/ci.yml"><img src="https://github.com/vouchdev/vouch/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://pypi.org/project/vouch-kb/"><img src="https://img.shields.io/pypi/v/vouch-kb.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/vouch-kb/"><img src="https://img.shields.io/pypi/pyversions/vouch-kb.svg" alt="Python versions"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/vouchdev/vouch.svg" alt="MIT licensed"></a>
+</p>
 
 > Agents should not start every session with amnesia — but they shouldn't get to write whatever they want either.
 
@@ -218,6 +224,31 @@ In your project's `.mcp.json`:
 ```
 
 `VOUCH_AGENT` is recorded as `proposed_by` and as the actor on every audit event, so multi-agent setups can attribute writes correctly.
+
+## Running vouch as an OpenClaw plugin
+
+Vouch ships an [OpenClaw](https://github.com/dripsmvcp/openclaw) plugin manifest at the
+repo root — [`openclaw.plugin.json`](openclaw.plugin.json). Drop the vouch repo
+into an OpenClaw deployment and the plugin loader picks it up automatically:
+the MCP server, the four slash commands (`/vouch-recall`, `/vouch-status`,
+`/vouch-resolve-issue`, `/vouch-propose-from-pr`), and the CLAUDE.md fenced
+snippet become available as one bundle.
+
+The manifest declares vouch's trust boundary explicitly — remote callers'
+filesystem access is confined, every write tool routes through the review
+gate, every lifecycle op is audit-logged. The `configSchema` exposes only
+`kb_path`, `agent`, and `transport` — no API keys, no secrets; vouch is
+local-first.
+
+```bash
+# Inside an OpenClaw deployment that vendors plugin repos:
+openclaw plugin add vouchdev/vouch
+openclaw plugin enable vouch
+```
+
+The plugin's `mcpServers.vouch` block matches the same `.mcp.json` shape
+Claude Code uses — both platforms drive the same `vouch serve` process,
+so the kb.* surface is identical regardless of host.
 
 ## JSONL request/response shape
 
