@@ -1,0 +1,21 @@
+# Vouch — knowledge base (OpenClaw plugin)
+
+This project loads vouch via the OpenClaw plugin manifest at
+[`openclaw.plugin.json`](https://github.com/vouchdev/vouch/blob/main/openclaw.plugin.json)
+in the vouch repo. The plugin exports the `vouch serve` MCP surface,
+the four bundled slash commands (`/vouch-recall`, `/vouch-status`,
+`/vouch-resolve-issue`, `/vouch-propose-from-pr`), and a trust
+boundary: every write tool is review-gated, every lifecycle op is
+audit-logged, and remote callers' filesystem access is confined.
+
+You **cannot** write durable knowledge directly. Proposals land in
+`.vouch/proposed/` and require human approval via `vouch approve`.
+This is intentional.
+
+- `kb_search` / `kb_context` to read.
+- `kb_propose_claim` / `kb_propose_page` to suggest additions — every
+  claim MUST cite at least one source or evidence id.
+- `kb_supersede` to replace a stale claim, `kb_contradict` to flag a
+  conflict for a human to resolve.
+
+You are recorded as `proposed_by: openclaw` in the audit log.

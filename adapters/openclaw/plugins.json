@@ -1,0 +1,11 @@
+{
+  "plugins": {
+    "vouch": {
+      "source": "github:vouchdev/vouch",
+      "enabled": true,
+      "config": {
+        "agent": "openclaw"
+      }
+    }
+  }
+}

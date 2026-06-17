@@ -139,6 +139,52 @@ def test_install_claude_md_skips_when_already_fenced(tmp_path: Path) -> None:
     assert "CLAUDE.md" not in again.appended
 
 
+# --- openclaw: second adapter with all four tiers, T3 reused from
+# claude-code rather than duplicated (vouchdev/vouch#230) --------------------
+
+
+def test_install_openclaw_t4_writes_all_tiers(tmp_path: Path) -> None:
+    result = install("openclaw", target=tmp_path, tier="T4")
+    assert (tmp_path / ".openclaw" / "plugins.json").is_file()
+    assert (tmp_path / "AGENTS.md").is_file()
+    cmd_dir = tmp_path / ".claude" / "commands"
+    assert (cmd_dir / "vouch-recall.md").is_file()
+    assert (cmd_dir / "vouch-status.md").is_file()
+    assert (cmd_dir / "vouch-resolve-issue.md").is_file()
+    assert (cmd_dir / "vouch-propose-from-pr.md").is_file()
+    assert (tmp_path / ".openclaw" / "policy.json").is_file()
+    # T1 plugins.json + T2 AGENTS.md + 4 T3 commands + T4 policy.json = 7.
+    assert len(result.written) == 7, result.written
+
+
+def test_install_openclaw_t3_commands_match_claude_code(tmp_path: Path) -> None:
+    """T3 is declared as a reuse of claude-code's commands, not a fork --
+    the manifest's `src` points at adapters/claude-code/ directly."""
+    install("openclaw", target=tmp_path, tier="T3")
+    for name in (
+        "vouch-recall.md", "vouch-status.md",
+        "vouch-resolve-issue.md", "vouch-propose-from-pr.md",
+    ):
+        installed = (tmp_path / ".claude" / "commands" / name).read_text(encoding="utf-8")
+        ref_path = REPO_ROOT / "adapters" / "claude-code" / ".claude" / "commands" / name
+        assert installed == ref_path.read_text(encoding="utf-8")
+
+
+def test_install_openclaw_is_idempotent(tmp_path: Path) -> None:
+    install("openclaw", target=tmp_path, tier="T4")
+    second = install("openclaw", target=tmp_path, tier="T4")
+    assert second.written == []
+    assert set(second.skipped) == {
+        ".openclaw/plugins.json",
+        "AGENTS.md",
+        ".claude/commands/vouch-recall.md",
+        ".claude/commands/vouch-status.md",
+        ".claude/commands/vouch-resolve-issue.md",
+        ".claude/commands/vouch-propose-from-pr.md",
+        ".openclaw/policy.json",
+    }
+
+
 # --- error paths ----------------------------------------------------------
 
 
@@ -157,7 +203,7 @@ def test_install_unknown_tier_raises(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("host", [
     "cursor", "continue", "codex", "claude-desktop",
-    "windsurf", "cline", "zed",
+    "windsurf", "cline", "zed", "openclaw",
 ])
 def test_each_host_writes_its_t1_file(host: str, tmp_path: Path) -> None:
     """Smoke test: every shipped host must produce at least one file at T1."""
