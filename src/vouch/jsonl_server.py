@@ -26,7 +26,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from . import audit, bundle, health
+from . import audit, bundle, health, volunteer_context
 from . import lifecycle as life
 from . import sessions as sess_mod
 from . import verify as verify_mod
@@ -412,6 +412,14 @@ def _h_crystallize(p: dict) -> dict:
     )
 
 
+def _h_volunteer_context(p: dict) -> dict:
+    offers = volunteer_context.drain_pending(
+        p["session_id"],
+        clear=bool(p.get("clear", True)),
+    )
+    return {"volunteers": [o.to_dict() for o in offers]}
+
+
 def _h_index_rebuild(_: dict) -> dict:
     return health.rebuild_index(_store())
 
@@ -595,6 +603,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.source_verify": _h_source_verify,
     "kb.session_start": _h_session_start,
     "kb.session_end": _h_session_end,
+    "kb.volunteer_context": _h_volunteer_context,
     "kb.crystallize": _h_crystallize,
     "kb.index_rebuild": _h_index_rebuild,
     "kb.lint": _h_lint,

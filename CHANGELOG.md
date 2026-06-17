@@ -10,7 +10,13 @@ All notable changes to vouch are documented here. Format follows
 - `vouch serve` now fails fast with a clear `vouch init` hint when no `.vouch/` KB is present, instead of starting a server that immediately misbehaves (#95).
 
 ### Added
-### Added
+- `kb.volunteer_context` — confidence-gated push context for active sessions.
+  `kb.session_start(task=…)` opens a background watch on retrieval salience;
+  when an approved claim's normalized relevance exceeds the configured
+  threshold (default `0.85`), vouch queues `{claim_id, relevance, why}` and
+  emits an MCP notification (`kb.volunteer_context`). JSONL and CLI clients
+  poll via `kb.volunteer_context` / `vouch session volunteer`. Pushes are
+  throttled (default 30s) and respect scope visibility (#236).
 - `vouch sync --vault <dir>` — bidirectional sync between the KB and an
   Obsidian/Logseq-style markdown vault. Forward (vault → KB): edits to
   `<vault>/vouch/pages/<id>.md` become page-edit proposals citing a
