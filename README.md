@@ -276,6 +276,36 @@ The JSONL transport reads one envelope per line on stdin, writes one per line on
 
 Errors come back with `ok:false` and a structured `error.code` (`method_not_found`, `missing_param`, `invalid_request`, `internal_error`).
 
+Every successful `kb.*` result that is object-shaped carries read-only trust metadata so clients can detect remote confinement:
+
+```json
+{
+  "id": "r1",
+  "ok": true,
+  "result": {
+    "backend": "fts5",
+    "hits": [],
+    "_meta": {
+      "vouch_trust": {
+        "remote": false,
+        "caller_kind": "jsonl",
+        "auth_subject": null
+      }
+    }
+  }
+}
+```
+
+| Transport | `remote` | `caller_kind` | `auth_subject` |
+|-----------|----------|---------------|----------------|
+| JSONL stdio | `false` | `jsonl` | `null` |
+| HTTP `/rpc` | `true` | `jsonl_http` | bearer fingerprint when authenticated |
+| MCP stdio | `false` | `mcp_stdio` | `null` |
+| HTTP `/mcp` | `true` | `mcp_http` | bearer fingerprint when authenticated |
+| CLI `--json` | `false` | `cli` | `null` |
+
+The block is server-attached metadata — client mutations are ignored. Array-shaped read results (e.g. `kb.list_claims`) pass through unchanged; trust rides on dict-shaped responses only (#233).
+
 ## Portable bundles
 
 ```bash

@@ -14,6 +14,11 @@ All notable changes to vouch are documented here. Format follows
   from the cited claims' lifecycle status. Deterministic in v1 (no LLM in the
   loop). Exposed across the CLI (`vouch synthesize`), MCP (`kb_synthesize`),
   and JSONL (`kb.synthesize`) surfaces (#222).
+- `_meta.vouch_trust` on every dict-shaped kb.* response: `{remote, caller_kind,
+  auth_subject}` so clients can detect remote confinement and surface it in
+  their UI. HTTP MCP calls report `remote: true, caller_kind: mcp_http`; CLI
+  `--json` reports `remote: false, caller_kind: cli`. Bearer-authenticated
+  HTTP calls include a stable token fingerprint as `auth_subject` (#233).
 - Entity-salience retrieval reflex: a per-session, in-memory ring buffer of
   recent caller queries drives a zero-LLM substring/FTS entity pass that
   attaches top-K matched claim candidates as `_meta.vouch_salience` on

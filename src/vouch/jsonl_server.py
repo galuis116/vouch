@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import traceback
+import yaml
 from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
@@ -50,6 +51,7 @@ from .proposals import (
     reject_auto_extracted,
 )
 from .stats import collect_stats
+from . import trust as trust_mod
 from .storage import (
     ArtifactNotFoundError,
     KBNotFoundError,
@@ -677,7 +679,11 @@ def handle_request(envelope: dict) -> dict:
         }
     try:
         result = HANDLERS[method](params)
-        return {"id": req_id, "ok": True, "result": result}
+        return {
+            "id": req_id,
+            "ok": True,
+            "result": trust_mod.finish_kb_result(result),
+        }
     except KeyError as e:
         return {
             "id": req_id, "ok": False,
@@ -702,6 +708,7 @@ def handle_request(envelope: dict) -> dict:
 def run_jsonl(stdin=None, stdout=None) -> None:
     """Read one request per line, write one response per line."""
     configure_logging()
+    trust_mod.set_stdio_default(trust_mod.JSONL_STDIO)
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     for line in stdin:

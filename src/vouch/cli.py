@@ -63,6 +63,7 @@ from .storage import (
     KBStore,
     discover_root,
 )
+from . import trust as trust_mod
 
 
 @contextmanager
@@ -103,6 +104,9 @@ def _whoami() -> str:
 
 
 def _emit_json(obj) -> None:
+    with trust_mod.trust_context(trust_mod.CLI):
+        if isinstance(obj, dict):
+            obj = trust_mod.attach_trust(obj)
     click.echo(json.dumps(obj, indent=2, default=str, sort_keys=True))
 
 

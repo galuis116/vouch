@@ -42,6 +42,7 @@ from .proposals import (
 )
 from .scoping import filter_hits, scoped_fetch_limit, viewer_from
 from .stats import collect_stats
+from . import trust as trust_mod
 from .storage import (
     ArtifactNotFoundError,
     KBNotFoundError,
@@ -827,7 +828,11 @@ def _current_model_name() -> str:
         return ""
 
 
+trust_mod.install_mcp_trust_wrappers(mcp)
+
+
 def run_stdio() -> None:
     """Entry point used by `vouch serve`."""
     configure_logging()
+    trust_mod.set_stdio_default(trust_mod.MCP_STDIO)
     mcp.run()

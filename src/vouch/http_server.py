@@ -50,7 +50,7 @@ import socket
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import uvicorn
 import yaml
@@ -60,9 +60,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Send
 
 from . import jsonl_server
+from . import trust as trust_mod
 from .capabilities import capabilities as build_caps
 
 log = logging.getLogger(__name__)
@@ -201,8 +202,14 @@ async def _rpc(request: Request) -> JSONResponse:
 
     agent = request.headers.get("X-Vouch-Agent")
     reset = jsonl_server._actor.set(agent) if agent else None
+    bearer = trust_mod.matched_bearer_token(
+        request.headers.get("authorization"),
+        tuple(getattr(request.app.state, "vouch_bearer_tokens", ()) or ()),
+    )
+    trust = trust_mod.with_auth_subject(trust_mod.JSONL_HTTP, bearer)
     try:
-        response = jsonl_server.handle_request(envelope)
+        with trust_mod.trust_context(trust):
+            response = jsonl_server.handle_request(envelope)
     finally:
         if reset is not None:
             jsonl_server._actor.reset(reset)
@@ -246,6 +253,33 @@ class BearerMiddleware(BaseHTTPMiddleware):
                 "unauthorized", "missing or invalid bearer token",
             ))
         return await call_next(request)
+
+
+class _McpTrustASGI:
+    """ASGI wrapper that sets ``vouch_trust`` for the full MCP request lifetime."""
+
+    def __init__(self, app: ASGIApp, *, accepted: tuple[str, ...]) -> None:
+        self._app = app
+        self._accepted = accepted
+
+    async def __call__(self, scope: dict, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        bearer = trust_mod.matched_bearer_token(
+            headers.get("authorization"),
+            self._accepted,
+        )
+        trust = trust_mod.with_auth_subject(trust_mod.MCP_HTTP, bearer)
+        token = trust_mod.set_trust_context(trust)
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            trust_mod.reset_trust_context(token)
 
 
 # --- ASGI app builder -----------------------------------------------------
@@ -311,7 +345,8 @@ def make_app(
         security_settings=vouch_server.mcp.settings.transport_security,
         retry_interval=getattr(vouch_server.mcp, "_retry_interval", None),
     )
-    mcp_asgi: ASGIApp = StreamableHTTPASGIApp(session_manager)
+    mcp_inner = StreamableHTTPASGIApp(session_manager)
+    mcp_asgi = cast(ASGIApp, _McpTrustASGI(mcp_inner, accepted=tuple(accepted)))
 
     routes: list = [
         Route("/healthz", _healthz, methods=["GET"]),
@@ -329,11 +364,13 @@ def make_app(
         async with session_manager.run():
             yield
 
-    return Starlette(
+    app = Starlette(
         routes=routes,
         middleware=[Middleware(BearerMiddleware, accepted=accepted)],
         lifespan=_lifespan,
     )
+    app.state.vouch_bearer_tokens = tuple(accepted)
+    return app
 
 
 # --- uvicorn wrapper that quacks like a stdlib HTTP server ----------------
