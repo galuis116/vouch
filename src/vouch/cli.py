@@ -32,6 +32,7 @@ from . import sessions as sess_mod
 from . import stats as stats_mod
 from . import sync as sync_mod
 from . import synthesize as synth
+from . import trust as trust_mod
 from . import vault_sync as vault_sync_mod
 from . import verify as verify_mod
 from .capabilities import capabilities as build_caps
@@ -63,7 +64,6 @@ from .storage import (
     KBStore,
     discover_root,
 )
-from . import trust as trust_mod
 
 
 @contextmanager

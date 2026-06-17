@@ -21,7 +21,6 @@ import json
 import os
 import sys
 import traceback
-import yaml
 from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
@@ -33,6 +32,7 @@ from . import audit, bundle, health, volunteer_context
 from . import lifecycle as life
 from . import salience as salience_mod
 from . import sessions as sess_mod
+from . import trust as trust_mod
 from . import verify as verify_mod
 from .capabilities import capabilities as build_caps
 from .context import build_context_pack
@@ -51,7 +51,6 @@ from .proposals import (
     reject_auto_extracted,
 )
 from .stats import collect_stats
-from . import trust as trust_mod
 from .storage import (
     ArtifactNotFoundError,
     KBNotFoundError,
