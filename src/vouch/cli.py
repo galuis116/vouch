@@ -29,9 +29,9 @@ from . import migrations as migrations_mod
 from . import pr_cache as prc_mod
 from . import provenance as prov_mod
 from . import sessions as sess_mod
-from . import synthesize as synth
 from . import stats as stats_mod
 from . import sync as sync_mod
+from . import synthesize as synth
 from . import vault_sync as vault_sync_mod
 from . import verify as verify_mod
 from .capabilities import capabilities as build_caps

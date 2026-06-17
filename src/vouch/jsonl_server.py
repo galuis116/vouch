@@ -26,6 +26,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from . import audit, bundle, health, volunteer_context
 from . import lifecycle as life
 from . import salience as salience_mod
