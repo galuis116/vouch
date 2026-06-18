@@ -18,6 +18,7 @@ METHODS = [
     "kb.status",
     "kb.stats",
     "kb.search",
+    "kb.neighbors",
     "kb.context",
     "kb.synthesize",
     "kb.read_page",

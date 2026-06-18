@@ -1348,6 +1348,27 @@ def search(
 
 
 @cli.command()
+@click.argument("node_id")
+@click.option("--depth", default=1, show_default=True, type=int)
+@click.option("--rel-type", "rel_types", multiple=True,
+              help="Filter to relation types (repeatable).")
+@click.option("--max-nodes", default=50, show_default=True, type=int)
+def neighbors(node_id: str, depth: int, rel_types: tuple[str, ...],
+              max_nodes: int) -> None:
+    """List graph neighbors of a claim, page, entity, or source."""
+    from .graph import find_neighbors
+
+    store = _load_store()
+    with _cli_errors():
+        result = find_neighbors(
+            store, node_id, depth=depth,
+            rel_types=list(rel_types) or None,
+            max_nodes=max_nodes,
+        )
+    _emit_json(result)
+
+
+@cli.command()
 @click.argument("task")
 @click.option("--limit", default=10, show_default=True, type=int)
 @click.option("--max-chars", default=None, type=int)
@@ -1355,6 +1376,10 @@ def search(
 @click.option("--min-items", default=0, type=int)
 @click.option("--project", default=None, help="Viewer project for scope filtering.")
 @click.option("--agent", default=None, help="Viewer agent for scope filtering.")
+@click.option("--expand-graph", is_flag=True,
+              help="Include 1-hop graph neighbors of search hits.")
+@click.option("--graph-depth", default=1, show_default=True, type=int)
+@click.option("--graph-limit", default=20, show_default=True, type=int)
 def context(
     task: str,
     limit: int,
@@ -1363,6 +1388,9 @@ def context(
     min_items: int,
     project: str | None,
     agent: str | None,
+    expand_graph: bool,
+    graph_depth: int,
+    graph_limit: int,
 ) -> None:
     """Build a ContextPack ready to inject into an agent prompt."""
     store = _load_store()
@@ -1375,6 +1403,9 @@ def context(
         require_citations=require_citations,
         project=project,
         agent=agent,
+        expand_graph=expand_graph,
+        graph_depth=graph_depth,
+        graph_limit=graph_limit,
     )
     _emit_json(pack)
 

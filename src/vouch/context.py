@@ -18,7 +18,7 @@ from typing import Any, Literal, cast
 
 import yaml
 
-from . import index_db
+from . import graph, index_db
 from .models import ClaimStatus, ContextItem, ContextPack, ContextQuality
 from .scoping import (
     ViewerContext,
@@ -138,6 +138,65 @@ def _enrich_summary(store: KBStore, kind: str, artifact_id: str, summary: str) -
     return summary
 
 
+def _append_graph_neighbors(
+    store: KBStore,
+    items: list[ContextItem],
+    *,
+    depth: int,
+    limit: int,
+    rel_types: list[str] | None,
+) -> list[str]:
+    """Expand `items` with 1-hop (or deeper) graph neighbors. Returns warnings."""
+    warnings: list[str] = []
+    if not items:
+        return warnings
+    seed_scores = {it.id: it.score for it in items}
+    neighbors = graph.graph_neighbors_for_seeds(
+        store,
+        [it.id for it in items],
+        depth=depth,
+        rel_types=rel_types,
+        max_nodes=limit,
+    )
+    existing = {it.id for it in items}
+    added = 0
+    for node in neighbors:
+        nid = node["id"]
+        if nid in existing:
+            continue
+        kind = node["kind"]
+        cites: list[str] = []
+        if kind == "claim":
+            try:
+                claim = store.get_claim(nid)
+            except ArtifactNotFoundError:
+                continue
+            if claim.status in _RETRACTED_CLAIM_STATUSES:
+                continue
+            cites = list(claim.evidence)
+        via = node.get("via", "")
+        parent_score = seed_scores.get(via, 0.5)
+        distance = int(node.get("distance", 1))
+        score = parent_score * (0.8 ** distance)
+        summary = node.get("summary") or _enrich_summary(store, kind, nid, "")
+        items.append(
+            ContextItem(
+                id=nid,
+                type=cast(ContextItemKind, kind),
+                summary=summary,
+                score=score,
+                backend="graph",
+                citations=cites,
+                freshness="unknown",
+            )
+        )
+        existing.add(nid)
+        added += 1
+    if added:
+        warnings.append(f"graph expansion added {added} neighbor(s)")
+    return warnings
+
+
 def build_context_pack(
     store: KBStore,
     *,
@@ -151,6 +210,10 @@ def build_context_pack(
     explain: bool = False,
     project: str | None = None,
     agent: str | None = None,
+    expand_graph: bool = False,
+    graph_depth: int = 1,
+    graph_limit: int = 20,
+    graph_rel_types: list[str] | None = None,
 ) -> ContextPack | dict[str, Any]:
     viewer = viewer_from(
         config_path=store.config_path,
@@ -184,6 +247,13 @@ def build_context_pack(
         )
 
     warnings: list[str] = []
+    if expand_graph:
+        warnings.extend(
+            _append_graph_neighbors(
+                store, items, depth=graph_depth, limit=graph_limit,
+                rel_types=graph_rel_types,
+            )
+        )
     failed: list[str] = []
     uncited: list[str] = []
     budget_truncated = False

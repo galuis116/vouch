@@ -183,6 +183,24 @@ def _load_cfg(store: KBStore) -> dict[str, Any]:
 
 
 @mcp.tool()
+def kb_neighbors(
+    node_id: str,
+    depth: int = 1,
+    rel_types: list[str] | None = None,
+    max_nodes: int = 50,
+) -> dict[str, Any]:
+    """Return graph neighbors of a claim, page, entity, or source."""
+    from .graph import find_neighbors
+
+    try:
+        return find_neighbors(
+            _store(), node_id, depth=depth, rel_types=rel_types, max_nodes=max_nodes,
+        )
+    except ArtifactNotFoundError as e:
+        raise ValueError(str(e)) from e
+
+
+@mcp.tool()
 def kb_context(
     task: str,
     limit: int = 10,
@@ -192,6 +210,9 @@ def kb_context(
     session_id: str | None = None,
     project: str | None = None,
     agent: str | None = None,
+    expand_graph: bool = False,
+    graph_depth: int = 1,
+    graph_limit: int = 20,
 ) -> dict[str, Any]:
     """Build a ContextPack ready to inject into an agent prompt.
 
@@ -207,6 +228,7 @@ def kb_context(
         store, query=task, limit=limit, max_chars=max_chars,
         min_items=min_items, require_citations=require_citations,
         project=project, agent=agent,
+        expand_graph=expand_graph, graph_depth=graph_depth, graph_limit=graph_limit,
     )
     return salience_mod.attach_salience(result, store, session_id, cfg)
 

@@ -169,6 +169,18 @@ def _load_cfg(store: KBStore) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _h_neighbors(p: dict) -> dict:
+    from .graph import find_neighbors
+
+    return find_neighbors(
+        _store(),
+        p["node_id"],
+        depth=int(p.get("depth", 1)),
+        rel_types=p.get("rel_types"),
+        max_nodes=int(p.get("max_nodes", 50)),
+    )
+
+
 def _h_context(p: dict) -> dict:
     store = _store()
     query = p["task"]
@@ -188,6 +200,10 @@ def _h_context(p: dict) -> dict:
         fail_on_budget_truncation=bool(p.get("fail_on_budget_truncation", False)),
         project=p.get("project"),
         agent=p.get("agent"),
+        expand_graph=bool(p.get("expand_graph", False)),
+        graph_depth=int(p.get("graph_depth", 1)),
+        graph_limit=int(p.get("graph_limit", 20)),
+        graph_rel_types=p.get("graph_rel_types"),
     )
     return salience_mod.attach_salience(result, store, session_id, cfg)
 
@@ -613,6 +629,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.status": _h_status,
     "kb.stats": _h_stats,
     "kb.search": _h_search,
+    "kb.neighbors": _h_neighbors,
     "kb.context": _h_context,
     "kb.synthesize": _h_synthesize,
     "kb.read_page": _h_read_page,
