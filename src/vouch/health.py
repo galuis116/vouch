@@ -16,7 +16,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from . import index_db
-from .audit import count_events
+from .audit import count_events, verify_chain
 from .models import Claim, ClaimStatus, Entity, Page, ProposalKind, ProposalStatus
 from .storage import KBStore, _yaml_load, sha256_hex
 from .verify import verify_all
@@ -202,6 +202,14 @@ def lint(store: KBStore, *, stale_after_days: int = 180) -> HealthReport:
 def doctor(store: KBStore) -> HealthReport:
     """Lint + source verification + index consistency. Slow but thorough."""
     report = lint(store)
+
+    chain = verify_chain(store.kb_dir)
+    if not chain.ok:
+        detail = f": {chain.reason}" if chain.reason else ""
+        report.findings.append(Finding(
+            "error", "audit_chain_broken",
+            f"audit chain broken at line {chain.line}{detail}",
+        ))
 
     # Source integrity (content hash).
     for vr in verify_all(store):
