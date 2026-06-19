@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from . import audit, index_db
 from .models import (
@@ -333,20 +334,97 @@ def _approval_block_reason(
     return None
 
 
+def _payload_block_reason(store: KBStore, proposal: Proposal) -> str | None:
+    """Dry-run the write-time validation `approve()` would hit, return None if clean.
+
+    Without this, `vouch approve a b` (#93's batch flow) calls
+    `check_approvable` for every id before touching disk — but the new
+    `store._validate_claim_refs` / existing `_validate_relation_refs` /
+    `put_page` ref-existence checks only fire *inside* `put_*` during
+    `approve()` itself. A typo in `claim.entities` (or any other graph
+    field a write path now rejects) therefore passes the precheck and
+    then raises mid-batch, contradicting the all-or-nothing
+    "nothing was approved" contract documented for the default batch
+    mode. Replicate the put_*-side ref guards here so the precheck
+    catches the same dangling refs the write side would.
+
+    Read-only: every check is a file-exists / model-validate probe.
+    Mirrors the shape of `_approval_block_reason` — returns the human-
+    readable reason or None.
+    """
+    payload = dict(proposal.payload)
+    if proposal.kind == ProposalKind.CLAIM:
+        try:
+            # Model validators fire first (citations, text non-empty, id
+            # path-safety, etc.). approve() builds the Claim the same way.
+            claim = Claim(**payload)
+        except (ValidationError, TypeError) as e:
+            return f"invalid claim payload: {e}"
+        # Mirror put_claim's evidence-existence loop.
+        for ref in claim.evidence:
+            if (
+                (store._source_dir(ref) / "meta.yaml").exists()
+                or store._evidence_path(ref).exists()
+            ):
+                continue
+            return f"claim {claim.id} cites unknown source/evidence {ref!r}"
+        try:
+            store._validate_claim_refs(claim)
+        except ValueError as e:
+            return str(e)
+    elif proposal.kind == ProposalKind.RELATION:
+        try:
+            rel = Relation(**payload)
+        except (ValidationError, TypeError) as e:
+            return f"invalid relation payload: {e}"
+        try:
+            store._validate_relation_refs(rel)
+        except ValueError as e:
+            return str(e)
+    elif proposal.kind == ProposalKind.PAGE:
+        try:
+            page = Page(**payload)
+        except (ValidationError, TypeError) as e:
+            return f"invalid page payload: {e}"
+        # Mirror put_page's claim / entity / source existence loops.
+        for cid in page.claims:
+            if not store._claim_path(cid).exists():
+                return f"page {page.id} references unknown claim {cid}"
+        for eid in page.entities:
+            if not store._entity_path(eid).exists():
+                return f"page {page.id} references unknown entity {eid}"
+        for sid in page.sources:
+            if not (store._source_dir(sid) / "meta.yaml").exists():
+                return f"page {page.id} references unknown source {sid}"
+    elif proposal.kind == ProposalKind.ENTITY:
+        try:
+            Entity(**payload)
+        except (ValidationError, TypeError) as e:
+            return f"invalid entity payload: {e}"
+    return None
+
+
 def check_approvable(
     store: KBStore, proposal_id: str, *, approved_by: str
 ) -> str | None:
     """Return why `proposal_id` can't be approved by `approved_by`, or None.
 
     Read-only. `None` means the deterministic gates pass; the actual write in
-    `approve()` can still fail on a pre-existing artifact or an I/O error.
-    Used by the batch CLI to validate a whole set before mutating anything.
+    `approve()` can still fail on an I/O error. Used by the batch CLI to
+    validate a whole set before mutating anything.
     """
     try:
         proposal = store.get_proposal(proposal_id)
     except ArtifactNotFoundError:
         return f"proposal {proposal_id} not found"
-    return _approval_block_reason(store, proposal, approved_by)
+    block = _approval_block_reason(store, proposal, approved_by)
+    if block:
+        return block
+    # Dry-run the put_*-side ref checks so the batch precheck catches the
+    # same dangling refs `approve()` would raise on. Without this, the
+    # default `vouch approve a b` all-or-nothing path silently approves
+    # the earlier ids in a batch and then dies mid-write on the offender.
+    return _payload_block_reason(store, proposal)
 
 
 def approve(

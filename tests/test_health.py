@@ -193,6 +193,28 @@ def test_fsck_flags_asymmetric_contradicts(store: KBStore) -> None:
     assert "asymmetric_contradicts" in codes
 
 
+def test_fsck_flags_dangling_claim_entity(store: KBStore) -> None:
+    """`claim.entities` pointing at a missing entity is an error finding.
+
+    Codex-review follow-up to PR-201: once `put_claim` rejects dangling
+    entity refs at write time (`_validate_claim_refs`), any legacy
+    claim that already points at a deleted / misspelled entity becomes
+    un-updatable — every lifecycle op (archive, confirm, supersede,
+    contradict) goes through `update_claim` and now raises. fsck must
+    surface this on-disk state so operators get a preflight repair
+    path instead of discovering the blocker when an unrelated update
+    fails. Same `error` severity as the sibling `dangling_supersedes`
+    / `_superseded_by` / `_contradicts` findings."""
+    src = store.put_source(b"e")
+    _write_claim_direct(store, Claim(
+        id="c1", text="t", evidence=[src.id], entities=["ghost-entity"],
+    ))
+    report = health.fsck(store)
+    codes = {f.code for f in report.findings}
+    assert "dangling_claim_entity" in codes
+    assert report.ok is False
+
+
 def test_fsck_decided_missing_artifact(store: KBStore) -> None:
     """An approved decided proposal whose artifact is gone is reported."""
     store.put_proposal(Proposal(

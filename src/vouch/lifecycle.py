@@ -52,6 +52,19 @@ def supersede(
     old.updated_at = datetime.now(UTC)
     new.supersedes = sorted({*new.supersedes, old.id})
     new.updated_at = datetime.now(UTC)
+    # Pre-validate BOTH claims before the first disk write so a legacy
+    # dangling ref on either side (entities / supersedes / superseded_by /
+    # contradicts) can't half-apply the supersede — without this,
+    # `update_claim(old)` would land `old.superseded_by = new.id` and then
+    # `update_claim(new)` would raise on `new.entities` (or another graph
+    # field) pointing at a missing artifact, leaving the KB with
+    # `old.superseded_by` set but no reciprocal `new.supersedes`, no
+    # relation written, and no audit event recorded. The validation is
+    # read-only (file-exists checks via `_validate_claim_refs`), so it's
+    # cheap; it just runs `put_claim`'s graph-ref guard against every
+    # touched claim up-front.
+    store._validate_claim_refs(old)
+    store._validate_claim_refs(new)
     store.update_claim(old)
     store.update_claim(new)
     # Mirror the supersedes link into the graph for graph-traversal queries.
@@ -78,6 +91,13 @@ def contradict(
     a.status = ClaimStatus.CONTESTED
     b.status = ClaimStatus.CONTESTED
     a.updated_at = b.updated_at = datetime.now(UTC)
+    # Mirror of the supersede atomicity guard: pre-validate both claims
+    # against the storage-layer ref check before any disk write, so a
+    # legacy dangling field on `b` can't leave the KB half-contradicted
+    # (`a.contradicts` written, `b.contradicts` and the relation never
+    # reached, no audit event).
+    store._validate_claim_refs(a)
+    store._validate_claim_refs(b)
     store.update_claim(a)
     store.update_claim(b)
     rel = Relation(

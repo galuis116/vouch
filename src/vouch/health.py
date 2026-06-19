@@ -264,6 +264,7 @@ def fsck(store: KBStore) -> HealthReport:
     entities: dict[str, Entity] = {e.id: e for e in store.list_entities()}
 
     _check_lifecycle_chains(claims, findings)
+    _check_claim_graph_refs(claims, entities, findings)
     _check_decided_proposals(store, claims, pages, entities, findings)
 
     db_present = (store.kb_dir / index_db.DB_FILENAME).exists()
@@ -332,6 +333,37 @@ def _check_lifecycle_chains(
                         f"claim {cid} contradicts {other} but {other} does not "
                         f"contradict {cid} back",
                         [cid, other],
+                    )
+                )
+
+
+def _check_claim_graph_refs(
+    claims: dict[str, Claim],
+    entities: dict[str, Entity],
+    findings: list[Finding],
+) -> None:
+    """Detect dangling `claim.entities` references.
+
+    Once the storage layer's `_validate_claim_refs` (this PR) rejects
+    dangling claim graph references at write time, any legacy on-disk
+    claim that already points at a deleted / misspelled entity becomes
+    un-updatable — every lifecycle op (archive, confirm, supersede,
+    contradict) goes through `update_claim` and now raises. Without an
+    fsck finding, operators only discover the blocker when an unrelated
+    update fails. Surface it as an `error`-severity finding alongside
+    the existing `dangling_supersedes` / `_superseded_by` / `_contradicts`
+    checks so users get a preflight repair path.
+    """
+    entity_ids = entities.keys()
+    for cid, c in claims.items():
+        for eid in c.entities:
+            if eid not in entity_ids:
+                findings.append(
+                    Finding(
+                        "error",
+                        "dangling_claim_entity",
+                        f"claim {cid} references missing entity {eid}",
+                        [cid, eid],
                     )
                 )
 
