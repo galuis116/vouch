@@ -342,17 +342,10 @@ def _check_claim_graph_refs(
     entities: dict[str, Entity],
     findings: list[Finding],
 ) -> None:
-    """Detect dangling `claim.entities` references.
+    """Detect `claim.entities` pointing at a missing entity.
 
-    Once the storage layer's `_validate_claim_refs` (this PR) rejects
-    dangling claim graph references at write time, any legacy on-disk
-    claim that already points at a deleted / misspelled entity becomes
-    un-updatable — every lifecycle op (archive, confirm, supersede,
-    contradict) goes through `update_claim` and now raises. Without an
-    fsck finding, operators only discover the blocker when an unrelated
-    update fails. Surface it as an `error`-severity finding alongside
-    the existing `dangling_supersedes` / `_superseded_by` / `_contradicts`
-    checks so users get a preflight repair path.
+    Sibling of `_check_lifecycle_chains` for the entity-ref field, so
+    legacy KBs surface the blocker before `update_claim` rejects it.
     """
     entity_ids = entities.keys()
     for cid, c in claims.items():

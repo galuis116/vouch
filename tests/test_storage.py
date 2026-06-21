@@ -424,27 +424,11 @@ def test_lifecycle_contradict_round_trips_after_guard(store: KBStore) -> None:
     assert store.get_claim("b").contradicts == ["a"]
 
 
-# --- post-#201 codex-review follow-ups -----------------------------------
-#
-# Three follow-ups requested by the Codex review on the original PR:
-#   (Fix 3) supersede / contradict must not half-apply when the second
-#           claim has a legacy dangling ref the new put_claim guard now
-#           rejects. The fix pre-validates both claims before the first
-#           disk write.
-#   (Fix 1) `check_approvable` must dry-run the put_*-side ref checks so
-#           the default batch-approve all-or-nothing precheck catches the
-#           same dangling refs `approve()` would raise on. Without this,
-#           `vouch approve a b` reports "everything looks good" and then
-#           dies mid-write.
-# (Fix 2 lives in test_health.py for the new `dangling_claim_entity`
-#  fsck finding.)
+# --- lifecycle atomicity + batch-approve precheck (Codex review) --------
 
 
 def _write_poisoned_claim(store: KBStore, claim: Claim) -> None:
-    """Persist a claim straight to disk, bypassing `put_claim`'s ref
-    guard. Models the legacy on-disk YAML a pre-PR-201 write path could
-    have produced — exactly the state these atomicity tests need to
-    trigger the second-update failure inside lifecycle."""
+    """Plant a claim YAML directly, bypassing put_claim's ref guard."""
     (store.kb_dir / "claims" / f"{claim.id}.yaml").write_text(
         _yaml_dump(claim.model_dump(mode="json"))
     )
@@ -453,12 +437,7 @@ def _write_poisoned_claim(store: KBStore, claim: Claim) -> None:
 def test_supersede_atomic_when_new_has_legacy_dangling_ref(
     store: KBStore,
 ) -> None:
-    """The first `update_claim` (writing `old.superseded_by = new.id`)
-    used to land before the second `update_claim(new)` raised on
-    `new.entities` pointing at a deleted entity — leaving the KB with
-    a one-sided link, no relation, and no audit event. `supersede()`
-    now pre-validates both claims via `_validate_claim_refs` before
-    the first disk write."""
+    """supersede must not leave old.superseded_by written when update_claim(new) raises."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="old", text="o", evidence=[src.id]))
     # Plant `new` with a legacy dangling entity ref straight to disk.
@@ -490,11 +469,7 @@ def test_supersede_atomic_when_new_has_legacy_dangling_ref(
 def test_contradict_atomic_when_b_has_legacy_dangling_ref(
     store: KBStore,
 ) -> None:
-    """Mirror of the supersede atomicity guard. Without pre-validation,
-    `update_claim(a)` would have written `a.contradicts = [b]` and then
-    `update_claim(b)` would raise on `b.entities=["ghost-entity"]`,
-    leaving `a.status=CONTESTED` and `a.contradicts=[b]` with no
-    reciprocal contradict on `b`, no relation, no audit event."""
+    """contradict must not leave a.contradicts written when update_claim(b) raises."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="a", text="a", evidence=[src.id]))
     _write_poisoned_claim(store, Claim(
@@ -522,12 +497,7 @@ def test_contradict_atomic_when_b_has_legacy_dangling_ref(
 def test_check_approvable_catches_claim_with_dangling_entity_ref(
     store: KBStore,
 ) -> None:
-    """`vouch approve a b` (#93) runs `check_approvable` for every id
-    before any write so the default mode is all-or-nothing. With the
-    new put_claim ref guard, a proposal whose `entities` payload has
-    a typo used to pass the precheck and then raise mid-batch —
-    contradicting the "nothing was approved" contract. `check_approvable`
-    now dry-runs the same `_validate_claim_refs` the put would hit."""
+    """Batch precheck blocks a claim proposal whose entities won't resolve."""
     src = store.put_source(b"e")
     pr = propose_claim(
         store, text="t", evidence=[src.id],
@@ -542,17 +512,10 @@ def test_check_approvable_catches_claim_with_dangling_entity_ref(
 def test_check_approvable_catches_relation_proposal_filed_directly(
     store: KBStore,
 ) -> None:
-    """`propose_relation` already validates endpoints at propose time, so
-    relation proposals can't normally be filed with a dangling target. But
-    a proposal filed via `store.put_proposal` directly (e.g. a legacy
-    pending proposal predating the propose-time gate, or one constructed
-    outside the helper) needs the same precheck protection: without it,
-    the batch flow would silently approve siblings and die on this one."""
+    """Defense-in-depth for legacy proposals that bypassed propose_relation's gate."""
     src = store.put_source(b"e")
     store.put_claim(Claim(id="real", text="r", evidence=[src.id]))
     from vouch.proposals import new_proposal_id
-    # Hand-file a proposal that bypasses propose_relation's endpoint check
-    # — models a proposal that landed before the gate existed.
     pr = Proposal(
         id=new_proposal_id(),
         kind=ProposalKind.RELATION,
@@ -575,9 +538,7 @@ def test_check_approvable_catches_relation_proposal_filed_directly(
 def test_check_approvable_clean_for_well_formed_proposal(
     store: KBStore,
 ) -> None:
-    """Positive guard: a proposal whose payload resolves cleanly still
-    returns None from `check_approvable`. Catches a regression where
-    the new precheck rejects honest proposals."""
+    """Positive guard: an honest proposal still passes the precheck."""
     src = store.put_source(b"e")
     store.put_entity(Entity(id="ent-ok", name="E", type=EntityType.CONCEPT))
     pr = propose_claim(

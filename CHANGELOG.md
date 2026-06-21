@@ -75,27 +75,17 @@ All notable changes to vouch are documented here. Format follows
   `dangling_supersedes` / `dangling_superseded_by` / `dangling_contradicts` as
   error-severity findings — the invariant was articulated but enforced by no
   writer. Same model-layer/storage pattern as #81 / #123. Closes #196.
-- `lifecycle.supersede` and `lifecycle.contradict` now pre-validate both touched
-  claims via `_validate_claim_refs` before the first disk write, keeping the
-  operation atomic when one of the claims is a pre-existing on-disk YAML with
-  a dangling graph ref. Without this, `update_claim(old)` would land
-  `old.superseded_by = new.id` and then `update_claim(new)` would raise on
-  `new.entities` (or another graph field) pointing at a missing artifact —
-  leaving the KB with `old.superseded_by` set but no reciprocal `new.supersedes`,
-  no relation, and no audit event. Codex-review follow-up on the original PR.
-- `proposals.check_approvable` now dry-runs the put_*-side ref guards
-  (via a new `_payload_block_reason`) so the default `vouch approve a b`
-  batch flow (#93) catches a proposal whose `claim.entities` (or relation
-  endpoint / page reference) is a typo BEFORE any disk write. Previously
-  the precheck only blocked on status / self-approval and the dangling-ref
-  raise fired mid-batch — contradicting the "nothing was approved"
-  all-or-nothing contract. Codex-review follow-up.
-- `vouch fsck` now reports `claim.entities` pointing at a missing entity as
-  a `dangling_claim_entity` error finding, alongside the existing
-  `dangling_supersedes` / `dangling_superseded_by` / `dangling_contradicts`
-  checks. Gives operators a preflight repair path for legacy KBs once the
-  write-time guard above starts rejecting un-updatable claims. Codex-review
-  follow-up.
+- `lifecycle.supersede` / `lifecycle.contradict` pre-validate both touched
+  claims before the first disk write so a legacy dangling ref on either
+  side can't half-apply the operation (one update written without the
+  reciprocal, no relation, no audit event).
+- `proposals.check_approvable` dry-runs the put_*-side ref guards so the
+  default `vouch approve a b` batch flow (#93) catches a dangling
+  `claim.entities` (or relation endpoint / page reference) before any
+  disk write, preserving the all-or-nothing contract.
+- `vouch fsck` reports `claim.entities` pointing at a missing entity as a
+  `dangling_claim_entity` error finding, alongside the existing
+  `dangling_supersedes` / `_superseded_by` / `_contradicts` checks.
 - `discover_root()` now honours `VOUCH_KB_PATH=/abs/path/.vouch` and returns the parent root, instead of always walking up from cwd. The env var was already documented in `adapters/generic-mcp/README.md` but wasn't wired into the code — closing the doc-vs-code drift removes the `"cwd": "..."` ceremony hosts like Claude Desktop need today to point at a specific KB.
 
 ## [0.1.0] — 2026-05-26
