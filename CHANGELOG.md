@@ -60,6 +60,13 @@ All notable changes to vouch are documented here. Format follows
   Events whose `object_ids` reference scoped claims, sources, or claim
   proposals outside the viewer context are filtered out; events with no
   `object_ids` remain visible to everyone (#232).
+- `vouch install-mcp openclaw` — ninth host in the adapter catalogue.
+  Declares plugin enablement (`.openclaw/plugins.json`), an `AGENTS.md`
+  fenced snippet, the four slash commands reused in place from the
+  `claude-code` adapter, and a project-local trust-boundary policy
+  (`.openclaw/policy.json`). Complements the repo-root
+  `openclaw.plugin.json` bundle manifest, which covers loading vouch into
+  an OpenClaw deployment rather than into one managed project (#230).
 - `vouch sync --vault <dir>` — bidirectional sync between the KB and an
   Obsidian/Logseq-style markdown vault. Forward (vault → KB): edits to
   `<vault>/vouch/pages/<id>.md` become page-edit proposals citing a
