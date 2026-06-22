@@ -114,7 +114,7 @@ def crystallize(
         with index_db.open_db(store.kb_dir) as conn:
             index_db.index_page(
                 conn, id=page.id, title=page.title, body=page.body,
-                type=page.type.value, tags=page.tags,
+                type=page.type, tags=page.tags,
             )
         summary_page_id = page.id
 

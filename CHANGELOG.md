@@ -7,6 +7,15 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- typed page kinds (#234): a KB can declare extra page kinds in
+  `.vouch/config.yaml` under `page_kinds`, each with `required_fields`, a
+  JSON-Schema-subset `frontmatter_schema`, `required_citations`, and one level
+  of `extends`. `kb.propose_page` now takes a `metadata` frontmatter dict and
+  validates the kind at both the propose and approve gates, surfacing one error
+  per offending field. The built-in `PageType` kinds keep working unchanged.
+  New `vouch schema list` and `vouch schema sync` commands inspect declared
+  kinds and audit existing pages against them; `propose-page` gains `--kind`
+  and repeatable `--meta key=value`.
 - `kb.synthesize` — answer-mode retrieval over the review-gated KB. Answers a
   query in prose from approved claims only, with an inline `[claim_id]`
   citation behind every sentence, an explicit `gaps` block listing query

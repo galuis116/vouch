@@ -25,6 +25,7 @@ from .models import (
     ProposalStatus,
     Relation,
 )
+from .page_kinds import PageKindError, validate_page
 from .storage import ArtifactNotFoundError, KBStore
 
 
@@ -172,6 +173,7 @@ def propose_page(
     source_ids: list[str] | None = None,
     proposed_by: str,
     tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
     rationale: str | None = None,
     slug_hint: str | None = None,
     session_id: str | None = None,
@@ -198,6 +200,19 @@ def propose_page(
             store.get_source(sid)
         except ArtifactNotFoundError as e:
             raise ProposalError(f"unknown source id: {sid}") from e
+    meta = metadata or {}
+    # Validate the page kind (built-in or config-declared) and its required
+    # frontmatter before filing. Raised here so propose-time callers get a
+    # per-field error rather than discovering it only at approve.
+    try:
+        validate_page(
+            store,
+            page_type,
+            meta,
+            has_citations=bool(claim_ids or source_ids),
+        )
+    except PageKindError as e:
+        raise ProposalError(str(e)) from e
     payload = {
         "id": slug_hint or _slugify(title),
         "title": title.strip(),
@@ -207,6 +222,7 @@ def propose_page(
         "entities": entity_ids or [],
         "sources": source_ids or [],
         "tags": tags or [],
+        "metadata": meta,
     }
     return _file_proposal(
         store, kind=ProposalKind.PAGE, payload=payload,
@@ -444,6 +460,18 @@ def approve(
         result = claim
     elif proposal.kind == ProposalKind.PAGE:
         page = Page(**payload)
+        # Re-validate the kind at the gate: config may have tightened (or a
+        # kind been removed) between propose and approve. Built-in kinds pass
+        # trivially, so this is a no-op for the common path.
+        try:
+            validate_page(
+                store,
+                page.type,
+                page.metadata,
+                has_citations=bool(page.claims or page.sources),
+            )
+        except PageKindError as e:
+            raise ProposalError(str(e)) from e
         # Vault-edit proposals use slug_hint=page_id so the payload id matches
         # an existing page. In that case update rather than create so the
         # approve path doesn't raise "page already exists" for every normal
@@ -457,7 +485,7 @@ def approve(
         with index_db.open_db(store.kb_dir) as conn:
             index_db.index_page(
                 conn, id=page.id, title=page.title, body=page.body,
-                type=page.type.value, tags=page.tags,
+                type=page.type, tags=page.tags,
             )
         result = page
         # Lazy import: extractors.edges calls back into propose_relation,

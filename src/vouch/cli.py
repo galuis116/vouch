@@ -41,6 +41,7 @@ from .lifecycle import LifecycleError
 from .logging_config import configure_logging
 from .models import Proposal, ProposalKind, ProposalStatus
 from .onboarding import seed_starter_kb
+from .page_kinds import PageKindError, load_page_kind_registry
 from .proposals import (
     EXPIRE_ACTOR,
     ProposalError,
@@ -978,25 +979,130 @@ def propose_claim_cmd(
 @click.option("--title", required=True)
 @click.option("--body", default="", help="Page body. Use `-` to read from stdin.")
 @click.option("--type", "page_type", default="concept", show_default=True)
+@click.option("--kind", "kind", default=None, help="alias for --type (config-declared page kind).")
+@click.option(
+    "--meta",
+    "meta",
+    multiple=True,
+    help="per-kind frontmatter field as key=value (repeatable). Value parsed as YAML.",
+)
 @click.option("--claim", "claims", multiple=True)
 @click.option("--entity", "entities", multiple=True)
 def propose_page_cmd(
-    title: str, body: str, page_type: str, claims: tuple[str, ...], entities: tuple[str, ...]
+    title: str,
+    body: str,
+    page_type: str,
+    kind: str | None,
+    meta: tuple[str, ...],
+    claims: tuple[str, ...],
+    entities: tuple[str, ...],
 ) -> None:
     store = _load_store()
     if body == "-":
         body = sys.stdin.read()
+    metadata = _parse_meta(meta)
     with _cli_errors():
         pr = propose_page(
             store,
             title=title,
             body=body,
-            page_type=page_type,
+            page_type=kind or page_type,
             claim_ids=list(claims),
             entity_ids=list(entities),
+            metadata=metadata,
             proposed_by=_whoami(),
         )
     click.echo(pr.id)
+
+
+def _parse_meta(pairs: tuple[str, ...]) -> dict[str, Any]:
+    """Parse repeated ``--meta key=value`` pairs into a frontmatter dict.
+
+    Values run through ``yaml.safe_load`` so ``attendees=[a, b]`` and
+    ``count=3`` arrive as a list / int rather than strings.
+    """
+    out: dict[str, Any] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise click.BadParameter(f"--meta expects key=value, got {pair!r}")
+        key, _, raw = pair.partition("=")
+        out[key.strip()] = yaml.safe_load(raw)
+    return out
+
+
+@cli.group(name="schema")
+def schema() -> None:
+    """inspect and validate config-declared page kinds (issue #234)."""
+
+
+@schema.command(name="list")
+@click.option("--json", "as_json", is_flag=True, help="emit machine-readable JSON.")
+def schema_list_cmd(as_json: bool) -> None:
+    """list the page kinds this KB recognizes (built-in + config-declared)."""
+    store = _load_store()
+    registry = load_page_kind_registry(store)
+    rows: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for name in sorted(registry.known()):
+        required, fm_schema, citations = registry.resolve(name)
+        rows.append(
+            {
+                "kind": name,
+                "required_fields": required,
+                "required_citations": citations,
+                "has_frontmatter_schema": bool(fm_schema),
+            }
+        )
+        extras: list[str] = []
+        if required:
+            extras.append(f"required={','.join(required)}")
+        if citations:
+            extras.append("citations-required")
+        if fm_schema:
+            extras.append("schema")
+        suffix = f"  ({'; '.join(extras)})" if extras else ""
+        lines.append(f"{name}{suffix}")
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+    for line in lines:
+        click.echo(line)
+
+
+@schema.command(name="sync")
+@click.option("--json", "as_json", is_flag=True, help="emit machine-readable JSON.")
+def schema_sync_cmd(as_json: bool) -> None:
+    """validate every page against its declared kind; report conflicts.
+
+    Read-only: it never rewrites pages (that would bypass the review gate).
+    Exits non-zero when any page conflicts, so it doubles as a CI guard after
+    a `page_kinds` change. Resolve conflicts by re-proposing the page through
+    the normal review flow.
+    """
+    store = _load_store()
+    registry = load_page_kind_registry(store)
+    conflicts: list[dict[str, Any]] = []
+    checked = 0
+    for page in store.list_pages():
+        checked += 1
+        try:
+            registry.validate(
+                page.type,
+                page.metadata,
+                has_citations=bool(page.claims or page.sources),
+            )
+        except PageKindError as e:
+            conflicts.append({"page": page.id, "kind": page.type, "problems": e.problems})
+    if as_json:
+        click.echo(json.dumps({"checked": checked, "conflicts": conflicts}, indent=2))
+    else:
+        click.echo(f"checked {checked} page(s)")
+        for c in conflicts:
+            click.echo(f"  {c['page']} [{c['kind']}]: {'; '.join(c['problems'])}")
+        if not conflicts:
+            click.echo("no conflicts")
+    if conflicts:
+        raise SystemExit(1)
 
 
 @cli.command(name="propose-entity")

@@ -92,6 +92,10 @@ def _starter_config() -> dict[str, Any]:
                 "human review via vouch pending/show/approve",
             ],
         },
+        # Extra page kinds beyond the built-in PageType enum. Each maps a kind
+        # name to {required_fields, frontmatter_schema, required_citations,
+        # extends}. See `vouch schema list` / docs for the shape. (issue #234)
+        "page_kinds": {},
     }
 
 

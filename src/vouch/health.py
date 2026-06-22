@@ -571,7 +571,7 @@ def rebuild_index(store: KBStore, *, on_progress: Callable[[str], None] | None =
                 id=p.id,
                 title=p.title,
                 body=p.body,
-                type=p.type.value,
+                type=p.type,
                 tags=p.tags,
             )
         for e in store.list_entities():

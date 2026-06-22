@@ -286,7 +286,7 @@ def kb_read_relation(relation_id: str) -> dict[str, Any]:
 @mcp.tool()
 def kb_list_pages() -> list[dict[str, Any]]:
     return [
-        {"id": p.id, "title": p.title, "type": p.type.value, "tags": p.tags}
+        {"id": p.id, "title": p.title, "type": p.type, "tags": p.tags}
         for p in _store().list_pages()
     ]
 
@@ -411,6 +411,7 @@ def kb_propose_page(
     claim_ids: list[str] | None = None,
     entity_ids: list[str] | None = None,
     source_ids: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
     rationale: str | None = None,
     slug_hint: str | None = None,
     session_id: str | None = None,
@@ -420,8 +421,8 @@ def kb_propose_page(
         pr = propose_page(
             _store(), title=title, body=body, page_type=page_type,
             claim_ids=claim_ids, entity_ids=entity_ids, source_ids=source_ids,
-            rationale=rationale, slug_hint=slug_hint, session_id=session_id,
-            dry_run=dry_run, proposed_by=_agent(),
+            metadata=metadata, rationale=rationale, slug_hint=slug_hint,
+            session_id=session_id, dry_run=dry_run, proposed_by=_agent(),
         )
     except (ProposalError, ArtifactNotFoundError, ValueError) as e:
         raise ValueError(str(e)) from e

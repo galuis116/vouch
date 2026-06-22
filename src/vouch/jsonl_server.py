@@ -336,6 +336,7 @@ def _h_propose_page(p: dict) -> dict:
         claim_ids=p.get("claim_ids"),
         entity_ids=p.get("entity_ids"),
         source_ids=p.get("source_ids"),
+        metadata=p.get("metadata"),
         rationale=p.get("rationale"),
         slug_hint=p.get("slug_hint"),
         session_id=p.get("session_id"),

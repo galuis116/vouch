@@ -289,14 +289,30 @@ class Page(BaseModel):
     id: str
     title: str
     body: str = ""
-    type: PageType = PageType.CONCEPT
+    # An open string rather than `PageType` so a KB can declare extra kinds in
+    # config.yaml (issue #234). Built-in kinds are still the `PageType` values;
+    # existence of a non-built-in kind is enforced by page_kinds.validate_page
+    # at the propose/approve gates, where the store (and its config) is in hand.
+    type: str = PageType.CONCEPT.value
     status: PageStatus = PageStatus.DRAFT
     claims: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    # Per-kind frontmatter (e.g. a meeting-notes kind's `attendees`). Empty for
+    # the built-in kinds; serialized into the on-disk YAML frontmatter.
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _normalize_type(cls, v: Any) -> str:
+        if isinstance(v, PageType):
+            return v.value
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("page type must be a non-empty string")
+        return v.strip()
 
 
 # --- audit + sessions -----------------------------------------------------
