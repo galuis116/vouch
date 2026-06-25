@@ -7,6 +7,13 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- `vouch auto-pr <repo-url>` — open N mergeable PRs against any github repo.
+  Sources open issues first then agent-discovered improvements, bootstraps a
+  contribution skill from the repo's merged PRs when it ships no guidance, and
+  cross-verifies each diff by alternating claude/codex as fixer and the other
+  as reviewer; a PR opens only when the repo's own test gate is green and the
+  reviewer signs off. A sibling tool — it never writes to the KB or the review
+  gate. Paired with the `auto-pr` skill.
 - typed page kinds (#234): a KB can declare extra page kinds in
   `.vouch/config.yaml` under `page_kinds`, each with `required_fields`, a
   JSON-Schema-subset `frontmatter_schema`, `required_citations`, and one level
