@@ -94,8 +94,19 @@ def test_engine_fix_builds_claude_argv():
     ap.Engine("claude", "high", fr).fix(cwd="/w", prompt="do it")
     argv = fr.calls[0]
     assert argv[:2] == ["claude", "-p"]
-    assert "--permission-mode" in argv and "bypassPermissions" in argv
+    # safer default: edits auto-accepted, no arbitrary command execution.
+    assert "--permission-mode" in argv and "acceptEdits" in argv
     assert "opus" in argv
+
+
+def test_engine_full_autonomy_escalates_claude():
+    fr = FakeRunner()
+    ap.Engine("claude", "high", fr, full_autonomy=True).fix(cwd="/w", prompt="x")
+    assert "bypassPermissions" in fr.calls[0]
+    # read-only paths never escalate, even under full autonomy.
+    fr2 = FakeRunner()
+    ap.Engine("claude", "high", fr2, full_autonomy=True).ask(cwd="/w", prompt="x")
+    assert "plan" in fr2.calls[0]
 
 
 def test_engine_fix_builds_codex_argv():

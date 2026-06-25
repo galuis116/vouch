@@ -159,13 +159,22 @@ class Engine:
     effort: str
     runner: Runner
     timeout: int | None = None
+    full_autonomy: bool = False  # opt-in to unsandboxed command execution
 
     def _run(self, prompt: str, *, cwd: str, edit: bool) -> str:
-        # fixing runs fully autonomously (headless -p can't answer prompts):
-        # claude `bypassPermissions` / codex `--sandbox workspace-write`.
-        # reviewing/asking is read-only: claude `plan` / codex `read-only`.
+        # reviewing/asking is read-only (claude `plan` / codex `read-only`).
+        # fixing auto-accepts edits but stays constrained by default: claude
+        # `acceptEdits` (no arbitrary Bash) / codex `workspace-write` (sandboxed
+        # to the clone, no network). `full_autonomy` escalates claude to
+        # `bypassPermissions` for repos whose fix genuinely needs to run
+        # commands -- an explicit, per-run operator choice, not the default.
         if self.name == "claude":
-            mode = "bypassPermissions" if edit else "plan"
+            if not edit:
+                mode = "plan"
+            elif self.full_autonomy:
+                mode = "bypassPermissions"
+            else:
+                mode = "acceptEdits"
             argv = ["claude", "-p", prompt, "--permission-mode", mode,
                     "--output-format", "json", *claude_flags(self.effort)]
         else:
@@ -493,10 +502,12 @@ def run_auto_pr(repo_url: str, workspace: str, count: int,
                 labels: tuple[str, ...] = (),
                 fork_owner: str | None = None,
                 max_revise: int = 2,
+                autonomy: str = "edit",
                 dry_run: bool = False) -> list[PRResult]:
     runner = runner or SubprocessRunner()
-    claude = Engine("claude", claude_effort, runner)
-    codex = Engine("codex", codex_effort, runner)
+    full = autonomy == "full"
+    claude = Engine("claude", claude_effort, runner, full_autonomy=full)
+    codex = Engine("codex", codex_effort, runner, full_autonomy=full)
     engines = (claude, codex)
 
     ctx = resolve_workspace(repo_url, workspace, runner, fork_owner=fork_owner)

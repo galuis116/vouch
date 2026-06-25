@@ -23,7 +23,7 @@ vouch auto-pr <repo-url> \
   --codex-effort  <low|medium|high|max> \
   [--issue-label good-first-issue] \
   [--fork-owner <login>] \
-  [--max-revise 2] \
+  [--max-revise 2] [--autonomy edit|full] \
   [--dry-run] [--json]
 ```
 
@@ -93,6 +93,22 @@ caps reasoning effort at `high`.)
 use `high` for real contributions; drop to `low`/`medium` only for cheap
 exploratory runs. start with `--dry-run` against a new repo to see what it
 *would* open before spending an engine on the real thing.
+
+## autonomy & safety
+
+the fixer drives the engines headlessly against a clone of an *untrusted*
+third-party repo, so the default is constrained:
+
+- `--autonomy edit` (default) — claude `acceptEdits` (auto-accepts file edits,
+  no arbitrary command execution) and codex `--sandbox workspace-write`
+  (writes confined to the clone, no network). sufficient for most fixes, since
+  the test gate runs through vouch's own runner, not the engine.
+- `--autonomy full` — escalates claude to `bypassPermissions` (the engine may
+  run arbitrary commands with no permission prompt). only use this for repos
+  whose fix genuinely needs to run commands, and only on repos you trust enough
+  to execute. it is an explicit, per-run operator choice — never the default.
+
+reviewing is always read-only (claude `plan` / codex `read-only`).
 
 ## failure semantics
 
