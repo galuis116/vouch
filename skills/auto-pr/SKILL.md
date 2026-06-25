@@ -84,7 +84,11 @@ the whole point; don't silently fall back to a single engine.
 | low | haiku | low |
 | medium | sonnet | medium |
 | high | opus | high |
-| max | opus + extended thinking | high (codex cap) |
+| max | opus | high (codex cap) |
+
+(claude models are passed as aliases — `opus`/`sonnet`/`haiku` — so the tool
+tracks the latest model in each tier. `high` and `max` both select opus; codex
+caps reasoning effort at `high`.)
 
 use `high` for real contributions; drop to `low`/`medium` only for cheap
 exploratory runs. start with `--dry-run` against a new repo to see what it

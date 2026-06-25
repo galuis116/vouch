@@ -31,8 +31,8 @@ class FakeRunner:
 # --- Task 1: effort mapping, data model -----------------------------------
 
 def test_claude_flags_by_effort():
-    assert ap.claude_flags("low") == ["--model", "claude-haiku-4-5"]
-    assert ap.claude_flags("max") == ["--model", "claude-opus-4-8"]
+    assert ap.claude_flags("low") == ["--model", "haiku"]
+    assert ap.claude_flags("max") == ["--model", "opus"]
 
 
 def test_codex_flags_by_effort():
@@ -94,8 +94,8 @@ def test_engine_fix_builds_claude_argv():
     ap.Engine("claude", "high", fr).fix(cwd="/w", prompt="do it")
     argv = fr.calls[0]
     assert argv[:2] == ["claude", "-p"]
-    assert "--permission-mode" in argv and "acceptEdits" in argv
-    assert "claude-opus-4-8" in argv
+    assert "--permission-mode" in argv and "bypassPermissions" in argv
+    assert "opus" in argv
 
 
 def test_engine_fix_builds_codex_argv():
@@ -103,7 +103,7 @@ def test_engine_fix_builds_codex_argv():
     ap.Engine("codex", "low", fr).fix(cwd="/w", prompt="do it")
     argv = fr.calls[0]
     assert argv[:2] == ["codex", "exec"]
-    assert "--full-auto" in argv
+    assert "--sandbox" in argv and "workspace-write" in argv
     assert "model_reasoning_effort=low" in " ".join(argv)
 
 
@@ -263,6 +263,29 @@ def test_run_gate_red_blocks(tmp_path):
 def _ctx(tmp_path):
     (tmp_path / ".git").mkdir(exist_ok=True)
     return ap.RepoCtx("o/n", "o/n", tmp_path, "main")
+
+
+def test_open_pr_qualifies_head_with_fork_owner(tmp_path):
+    ctx = ap.RepoCtx("o/n", "o/n", tmp_path, "main", fork_owner="me")
+    fr = FakeRunner([(["gh", "pr", "create"],
+                      ap.RunResult(0, "https://github.com/o/n/pull/5", ""))])
+    item = ap.WorkItem("issue", "t", "b", "t", number=2)
+    url = ap.open_pr(ctx, item, "auto-pr/t", fr, dry_run=False)
+    assert url == "https://github.com/o/n/pull/5"
+    create = next(c for c in fr.calls if c[:3] == ["gh", "pr", "create"])
+    assert "me:auto-pr/t" in create
+    assert any("push" in c for c in fr.calls if c[:2] == ["git", "-C"])
+
+
+def test_resolve_detects_fork_owner_when_no_push(tmp_path):
+    (tmp_path / ".git").mkdir()
+    fr = FakeRunner([
+        (["git", "-C", str(tmp_path), "symbolic-ref"],
+         ap.RunResult(0, "origin/main\n", "")),
+        (["gh", "api", "user"], ap.RunResult(0, "octocat\n", "")),
+    ])
+    ctx = ap.resolve_workspace("owner/name", str(tmp_path), fr)
+    assert ctx.fork_owner == "octocat"
 
 
 def test_process_item_opens_on_approve(tmp_path):

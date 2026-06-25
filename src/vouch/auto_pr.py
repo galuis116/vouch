@@ -26,11 +26,13 @@ from typing import Protocol
 
 EFFORT_LEVELS = ("low", "medium", "high", "max")
 
+# aliases (not pinned ids) so the tool tracks the latest model in each tier
+# and survives model-id churn; the claude CLI resolves "opus"/"sonnet"/"haiku".
 _CLAUDE_MODEL = {
-    "low": "claude-haiku-4-5",
-    "medium": "claude-sonnet-4-6",
-    "high": "claude-opus-4-8",
-    "max": "claude-opus-4-8",
+    "low": "haiku",
+    "medium": "sonnet",
+    "high": "opus",
+    "max": "opus",
 }
 # codex caps reasoning effort at "high"; "max" maps onto it.
 _CODEX_REASONING = {"low": "low", "medium": "medium", "high": "high", "max": "high"}
@@ -159,13 +161,16 @@ class Engine:
     timeout: int | None = None
 
     def _run(self, prompt: str, *, cwd: str, edit: bool) -> str:
+        # fixing runs fully autonomously (headless -p can't answer prompts):
+        # claude `bypassPermissions` / codex `--sandbox workspace-write`.
+        # reviewing/asking is read-only: claude `plan` / codex `read-only`.
         if self.name == "claude":
-            mode = "acceptEdits" if edit else "plan"
+            mode = "bypassPermissions" if edit else "plan"
             argv = ["claude", "-p", prompt, "--permission-mode", mode,
                     "--output-format", "json", *claude_flags(self.effort)]
         else:
-            sandbox = ["--full-auto"] if edit else ["--sandbox", "read-only"]
-            argv = ["codex", "exec", prompt, *sandbox, "--cd", cwd,
+            sandbox = "workspace-write" if edit else "read-only"
+            argv = ["codex", "exec", prompt, "--sandbox", sandbox, "--cd", cwd,
                     *codex_flags(self.effort)]
         res = self.runner.run(argv, cwd=cwd, timeout=self.timeout)
         return engine_text(self.name, res.stdout)
@@ -205,8 +210,10 @@ def resolve_workspace(url: str, workspace: str, runner: Runner, *,
     if not (clone_dir / ".git").exists():
         clone_dir.parent.mkdir(parents=True, exist_ok=True)
         if has_push:
-            res = runner.run(["gh", "repo", "clone", repo, "--", str(clone_dir)])
+            # `gh repo clone <repo> <dir>` -- dir is a positional, not a gitflag.
+            res = runner.run(["gh", "repo", "clone", repo, str(clone_dir)])
         else:
+            # for fork --clone, the dir goes to the underlying git clone after `--`.
             res = runner.run(["gh", "repo", "fork", repo, "--clone",
                               "--default-branch-only", "--", str(clone_dir)])
         if res.code != 0:
@@ -214,6 +221,11 @@ def resolve_workspace(url: str, workspace: str, runner: Runner, *,
     res = runner.run(["git", "-C", str(clone_dir), "symbolic-ref", "--short",
                       "refs/remotes/origin/HEAD"])
     default_branch = res.stdout.strip().rsplit("/", 1)[-1] or "main"
+    # without push access the PR comes from a fork; qualify the head as
+    # <fork-owner>:<branch> so `gh pr create --repo <parent>` is unambiguous.
+    if fork_owner is None and not has_push:
+        who = runner.run(["gh", "api", "user", "--jq", ".login"])
+        fork_owner = who.stdout.strip() or None
     return RepoCtx(repo, url, clone_dir, default_branch, fork_owner)
 
 
@@ -430,7 +442,7 @@ def open_pr(ctx: RepoCtx, item: WorkItem, branch: str, runner: Runner, *,
     res = runner.run([
         "gh", "pr", "create", "--repo", ctx.repo, "--head", head,
         "--base", ctx.default_branch, "--title", item.title, "--body", body,
-    ])
+    ], cwd=str(ctx.clone_dir))
     out = res.stdout.strip()
     return out.splitlines()[-1] if out else None
 
