@@ -5,10 +5,14 @@ only the subprocess boundary is mocked; all stage logic is real.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from vouch import auto_pr as ap
 from vouch import dual_solve as ds
+from vouch.models import ContextItem, ContextPack
+from vouch.storage import KBStore
 
 
 class FakeRunner:
@@ -68,3 +72,41 @@ def test_fetch_issue_raises_on_gh_error():
     fr = FakeRunner([(["gh", "issue", "view"], ap.RunResult(1, "", "not found"))])
     with pytest.raises(RuntimeError, match="could not fetch issue"):
         ds.fetch_issue("https://github.com/o/n/issues/1", fr)
+
+
+def test_repo_root_returns_toplevel():
+    fr = FakeRunner([(["git", "-C", "/w", "rev-parse", "--show-toplevel"],
+                      ap.RunResult(0, "/repo/root\n", ""))])
+    assert ds.repo_root(fr, Path("/w")) == Path("/repo/root")
+
+
+def test_repo_root_raises_outside_git():
+    fr = FakeRunner([(["git", "-C", "/w", "rev-parse"],
+                      ap.RunResult(128, "", "not a git repo"))])
+    with pytest.raises(RuntimeError, match="not inside a git repository"):
+        ds.repo_root(fr, Path("/w"))
+
+
+def test_ground_prompt_renders_items(tmp_path, monkeypatch):
+    store = KBStore.init(tmp_path)
+    pack = ContextPack(query="q", items=[
+        ContextItem(id="c1", type="claim", summary="auth uses jwt"),
+    ])
+    monkeypatch.setattr(ds, "build_context_pack", lambda *a, **k: pack)
+    out = ds.ground_prompt(store, "auth")
+    assert "[c1]" in out and "auth uses jwt" in out
+
+
+def test_ground_prompt_empty_is_explicit(tmp_path, monkeypatch):
+    store = KBStore.init(tmp_path)
+    monkeypatch.setattr(ds, "build_context_pack",
+                        lambda *a, **k: ContextPack(query="q", items=[]))
+    assert "nothing" in ds.ground_prompt(store, "x").lower()
+
+
+def test_build_prompt_includes_issue_and_grounding():
+    issue = ds.Issue(title="Fix the lexer", body="it crashes", number=5)
+    p = ds.build_prompt(issue, "- [c1] relevant claim")
+    assert "Fix the lexer" in p and "it crashes" in p
+    assert "[c1] relevant claim" in p
+    assert "smallest correct change" in p

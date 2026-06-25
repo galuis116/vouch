@@ -15,8 +15,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .auto_pr import Runner
+from .context import build_context_pack
+from .models import ContextPack
+from .storage import KBStore
 
-__all__ = ["Candidate", "Issue", "fetch_issue", "parse_issue_ref"]
+__all__ = [
+    "Candidate",
+    "Issue",
+    "build_prompt",
+    "fetch_issue",
+    "ground_prompt",
+    "parse_issue_ref",
+    "repo_root",
+]
 
 
 def _require_engines() -> None:
@@ -89,4 +100,57 @@ def fetch_issue(ref: str, runner: Runner) -> Issue:
         body=str(data.get("body", "") or ""),
         number=data.get("number"),
         url=data.get("url"),
+    )
+
+
+_FIX_PROMPT = (
+    "you are resolving a github issue in the current repository.\n\n"
+    "issue #{num}: {title}\n\n{body}\n\n"
+    "what the project's knowledge base already knows about this area:\n"
+    "{grounding}\n\n"
+    "make the smallest correct change that resolves this issue, including a "
+    "regression test if the repo has tests. keep it to one logical change. "
+    "do not add any AI-attribution trailer to commits."
+)
+
+
+def repo_root(runner: Runner, cwd: Path) -> Path:
+    """Return the git repository root for a given working directory.
+
+    Uses ``git rev-parse --show-toplevel`` through an injectable ``Runner``
+    so it is testable. Raises ``RuntimeError`` if not in a git repository.
+    """
+    res = runner.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"])
+    if res.code != 0:
+        raise RuntimeError("not inside a git repository")
+    return Path(res.stdout.strip())
+
+
+def ground_prompt(store: KBStore, query: str, *, limit: int = 8) -> str:
+    """Render knowledge base context into a bulleted prompt fragment.
+
+    Calls ``build_context_pack`` to query the KB for items matching ``query``.
+    Returns a string like:
+      - [c1] auth uses jwt
+      - [c2] session expiry is 1 hour
+    If the KB is empty for this query, returns an explicit "(nothing)" message.
+    """
+    pack = build_context_pack(store, query=query, limit=limit)
+    items = pack.items if isinstance(pack, ContextPack) else []
+    if not items:
+        return "(the knowledge base has nothing on this topic yet.)"
+    return "\n".join(f"- [{it.id}] {it.summary}" for it in items)
+
+
+def build_prompt(issue: Issue, grounding: str) -> str:
+    """Fill the shared fix prompt template with an issue and grounding text.
+
+    Takes an ``Issue`` (title, body, number) and rendered grounding (from
+    ``ground_prompt``), and returns the full prompt to send to a code engine.
+    """
+    return _FIX_PROMPT.format(
+        num=issue.number if issue.number is not None else "?",
+        title=issue.title,
+        body=issue.body or "(no description)",
+        grounding=grounding,
     )
