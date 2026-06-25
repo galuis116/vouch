@@ -1,0 +1,8 @@
+{
+  "vouch": {
+    "review_gated_writes": true,
+    "audit_logged_lifecycle": true,
+    "remote_callers_filesystem": "confined",
+    "agent": "openclaw"
+  }
+}
