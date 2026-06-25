@@ -16,7 +16,8 @@ from pathlib import Path
 
 from .auto_pr import Engine, Runner, slugify
 from .context import build_context_pack
-from .models import ContextPack
+from .models import ContextPack, SourceType
+from .proposals import propose_claim
 from .storage import KBStore
 
 __all__ = [
@@ -26,6 +27,8 @@ __all__ = [
     "fetch_issue",
     "ground_prompt",
     "parse_issue_ref",
+    "parse_summary",
+    "record_to_kb",
     "repo_root",
     "run_candidate",
 ]
@@ -198,3 +201,65 @@ def run_candidate(engine: Engine, issue: Issue, prompt: str, root: Path,
 
     cand.ok = True
     return cand
+
+
+_SUMMARY_PROMPT = (
+    "in at most two lines, summarise the change you just made.\n"
+    "line 1 must start with `ROOT CAUSE:` then one sentence.\n"
+    "line 2 must start with `FIX:` then one sentence on the fix pattern."
+)
+
+
+def parse_summary(text: str) -> tuple[str, str]:
+    root_cause, fix = "", ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        up = line.upper()
+        if up.startswith("ROOT CAUSE") and ":" in line:
+            root_cause = line.split(":", 1)[1].strip()
+        elif up.startswith("FIX") and ":" in line:
+            fix = line.split(":", 1)[1].strip()
+    return root_cause, fix
+
+
+def record_to_kb(store: KBStore, issue: Issue, chosen: Candidate, engine: Engine,
+                 reason: str, *, proposed_by: str) -> list[str]:
+    n = issue.number if issue.number is not None else "?"
+    # the winning commit becomes a Source so every claim cites real evidence.
+    content = (
+        f"dual-solve winner ({chosen.engine}) for issue #{n}: {issue.title}\n"
+        f"commit {chosen.sha or '(uncommitted)'}\n\n{chosen.diff}"
+    ).encode()
+    src = store.put_source(
+        content,
+        title=f"dual-solve patch for #{n} ({chosen.engine})",
+        url=issue.url,
+        locator=chosen.sha or chosen.branch,
+        source_type=SourceType.COMMIT,
+        media_type="text/x-diff",
+    )
+
+    root_cause, fix = parse_summary(
+        engine.ask(cwd=str(chosen.worktree), prompt=_SUMMARY_PROMPT)
+    )
+
+    decision = f"for issue #{n} ({issue.title}), chose {chosen.engine}'s solution"
+    decision += f" -- {reason}" if reason.strip() else "."
+    drafts: list[tuple[str, str, float]] = [(decision, "decision", 0.8)]
+    if root_cause:
+        drafts.append(
+            (f"root cause of issue #{n} ({issue.title}): {root_cause}", "fact", 0.7))
+    if fix:
+        drafts.append(
+            (f"fix pattern for issue #{n} ({issue.title}): {fix}", "workflow", 0.7))
+
+    ids: list[str] = []
+    for text, ctype, conf in drafts[:3]:
+        res = propose_claim(
+            store, text=text, evidence=[src.id], proposed_by=proposed_by,
+            claim_type=ctype, confidence=conf,
+            tags=["dual-solve", f"issue-{n}"],
+            rationale=f"recorded by vouch dual-solve; winner={chosen.engine}",
+        )
+        ids.append(res.id)
+    return ids

@@ -11,7 +11,7 @@ import pytest
 
 from vouch import auto_pr as ap
 from vouch import dual_solve as ds
-from vouch.models import ContextItem, ContextPack
+from vouch.models import ContextItem, ContextPack, ProposalStatus
 from vouch.storage import KBStore
 
 
@@ -177,3 +177,46 @@ def test_run_candidate_engine_crash_is_caught(tmp_path):
     cand = ds.run_candidate(ds.Engine("codex", "high", boom), _issue(),
                             "p", root, "HEAD", wt, boom)
     assert cand.ok is False and "engine failed" in (cand.error or "")
+
+
+def test_parse_summary_splits_lines():
+    text = "ROOT CAUSE: off-by-one in scan\nFIX: clamp the index"
+    rc, fix = ds.parse_summary(text)
+    assert rc == "off-by-one in scan" and fix == "clamp the index"
+
+
+def test_parse_summary_tolerates_missing():
+    rc, fix = ds.parse_summary("nothing structured here")
+    assert rc == "" and fix == ""
+
+
+def test_record_to_kb_proposes_cited_claims(tmp_path):
+    store = KBStore.init(tmp_path)
+    # codex engine returns a structured summary when asked read-only.
+    fr = FakeRunner([(["codex"], ap.RunResult(
+        0, "ROOT CAUSE: bad regex\nFIX: anchor the pattern", ""))])
+    eng = ds.Engine("codex", "high", fr)
+    issue = ds.Issue(title="Crash on empty input", body="b", number=12, url="u")
+    chosen = ds.Candidate(engine="codex", branch="vouch-dual/12-x-codex",
+                          worktree=tmp_path / "wt", diff="patch", sha="deadbeef",
+                          ok=True)
+    ids = ds.record_to_kb(store, issue, chosen, eng, "cleaner diff",
+                          proposed_by="dual-solve")
+    assert len(ids) == 3  # decision + root cause + fix pattern
+    pending = store.list_proposals(ProposalStatus.PENDING)
+    assert len(pending) == 3
+    # every proposed claim cites the one registered source (validation passes).
+    src_ids = {p.payload["evidence"][0] for p in pending}
+    assert len(src_ids) == 1
+    assert any("chose codex" in p.payload["text"] for p in pending)
+
+
+def test_record_to_kb_decision_only_when_summary_blank(tmp_path):
+    store = KBStore.init(tmp_path)
+    fr = FakeRunner([(["codex"], ap.RunResult(0, "no structure", ""))])
+    eng = ds.Engine("codex", "high", fr)
+    issue = ds.Issue(title="t", body="", number=1)
+    chosen = ds.Candidate(engine="codex", branch="b", worktree=tmp_path / "wt",
+                          diff="d", sha="s", ok=True)
+    ids = ds.record_to_kb(store, issue, chosen, eng, "", proposed_by="dual-solve")
+    assert len(ids) == 1  # only the decision claim
