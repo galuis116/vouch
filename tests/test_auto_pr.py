@@ -230,6 +230,43 @@ def test_is_duplicate_fails_closed_on_error():
     assert ap.is_duplicate(ctx, "anything", fr) is True
 
 
+def test_is_duplicate_ignores_generic_substring_title():
+    # an existing PR titled "fix" must NOT subsume a distinct longer topic.
+    ctx = ap.RepoCtx("o/n", "o/n", Path("/w"), "main")
+    fr = FakeRunner([(["gh", "pr", "list"],
+                      ap.RunResult(0, '[{"title": "fix", "url": "x"}]', ""))])
+    assert ap.is_duplicate(ctx, "fix the parser crash in the lexer", fr) is False
+
+
+def test_source_uniquifies_duplicate_slugs(monkeypatch):
+    ctx = ap.RepoCtx("o/n", "o/n", Path("/w"), "main")
+    issues = ('[{"number":1,"title":"Fix bug","body":"","url":"u1"},'
+              '{"number":2,"title":"Fix bug","body":"","url":"u2"}]')
+    fr = FakeRunner([
+        (["gh", "issue", "list"], ap.RunResult(0, issues, "")),
+        (["gh", "pr", "list"], ap.RunResult(0, "[]", "")),
+    ])
+    eng = ap.Engine("claude", "high", fr)
+    items = ap.source_work_items(ctx, 2, fr, eng)
+    slugs = [it.slug for it in items]
+    assert sorted(slugs) == ["fix-bug", "fix-bug-2"]
+
+
+def test_git_diff_intent_adds_untracked(tmp_path):
+    ctx = ap.RepoCtx("o/n", "o/n", tmp_path, "main")
+    fr = FakeRunner([(["git", "-C", str(tmp_path), "diff"],
+                      ap.RunResult(0, "D", ""))])
+    ap.git_diff(ctx, fr)
+    assert any(c[:6] == ["git", "-C", str(tmp_path), "add", "-A", "-N"]
+               for c in fr.calls)
+
+
+def test_subprocess_runner_handles_missing_binary():
+    res = ap.SubprocessRunner().run(["definitely-not-a-real-binary-xyz123"])
+    assert res.code == 127
+    assert "command not found" in res.stderr
+
+
 def test_source_fills_remainder_with_discovery(monkeypatch):
     ctx = ap.RepoCtx("o/n", "o/n", Path("/w"), "main")
     fr = FakeRunner([
@@ -458,6 +495,24 @@ def test_cli_auto_pr_prints_urls(monkeypatch, tmp_path):
     assert r.exit_code == 0, r.output
     assert "https://github.com/o/n/pull/9" in r.output
     assert "skipped" in r.output
+
+
+def test_cli_auto_pr_surfaces_errors(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+
+    from vouch.cli import cli
+
+    def boom(*a, **k):
+        raise ValueError("cannot parse github repo from 'x'")
+
+    monkeypatch.setattr("vouch.auto_pr.run_auto_pr", boom)
+    r = CliRunner().invoke(cli, [
+        "auto-pr", "x", "--workspace", str(tmp_path), "--count", "1",
+        "--claude-effort", "high", "--codex-effort", "high",
+    ])
+    assert r.exit_code != 0
+    assert "cannot parse github repo" in r.output
+    assert "Traceback" not in r.output
 
 
 def test_cli_auto_pr_json(monkeypatch, tmp_path):

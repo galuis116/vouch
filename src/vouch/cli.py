@@ -807,11 +807,17 @@ def auto_pr_cmd(repo_url: str, workspace: str, count: int, claude_effort: str,
     reviewing engine signs off. A sibling tool — it never writes to the KB.
     """
     from . import auto_pr as ap_mod
-    results = ap_mod.run_auto_pr(
-        repo_url, workspace, count, claude_effort, codex_effort,
-        labels=tuple(issue_labels), fork_owner=fork_owner,
-        max_revise=max_revise, autonomy=autonomy, dry_run=dry_run,
-    )
+    try:
+        results = ap_mod.run_auto_pr(
+            repo_url, workspace, count, claude_effort, codex_effort,
+            labels=tuple(issue_labels), fork_owner=fork_owner,
+            max_revise=max_revise, autonomy=autonomy, dry_run=dry_run,
+        )
+    except (ValueError, RuntimeError) as e:
+        # surface auto-pr failures as `Error: ...` like the rest of the cli,
+        # not a bare traceback. (auto_pr raises ValueError/RuntimeError, not the
+        # KB domain types that _cli_errors handles.)
+        raise click.ClickException(str(e)) from e
     if as_json:
         _emit_json([
             {"status": r.status, "url": r.url, "fixer": r.fixer,

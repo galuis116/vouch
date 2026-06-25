@@ -19,18 +19,18 @@ import json
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 
 def _require_engines() -> None:
-    """Fail fast (before any clone) if an engine binary isn't on PATH."""
-    missing = [b for b in ("claude", "codex") if shutil.which(b) is None]
+    """Fail fast (before any clone) if a required binary isn't on PATH."""
+    missing = [b for b in ("git", "gh", "claude", "codex") if shutil.which(b) is None]
     if missing:
         raise RuntimeError(
             f"required CLI not on PATH: {', '.join(missing)} "
-            "(auto-pr cross-verifies, so both claude and codex must be installed)"
+            "(auto-pr needs git, gh, and both engines claude and codex)"
         )
 
 # --- effort mapping -------------------------------------------------------
@@ -96,10 +96,19 @@ class SubprocessRunner:
 
     def run(self, argv: list[str], *, cwd: str | None = None,
             stdin: str | None = None, timeout: int | None = None) -> RunResult:
-        proc = subprocess.run(
-            argv, cwd=cwd, input=stdin, capture_output=True, text=True,
-            timeout=timeout,
-        )
+        try:
+            proc = subprocess.run(
+                argv, cwd=cwd, input=stdin, capture_output=True, text=True,
+                timeout=timeout,
+            )
+        except FileNotFoundError:
+            # a missing binary becomes a nonzero result, not a crashed batch.
+            return RunResult(127, "", f"{argv[0]}: command not found")
+        except subprocess.TimeoutExpired as e:
+            out = e.stdout or ""
+            if isinstance(out, bytes):
+                out = out.decode(errors="replace")
+            return RunResult(124, out, f"timed out after {timeout}s")
         return RunResult(proc.returncode, proc.stdout, proc.stderr)
 
 
@@ -327,6 +336,10 @@ _DISCOVER_PROMPT = (
 )
 
 
+def _title_tokens(s: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", s.lower()))
+
+
 def is_duplicate(ctx: RepoCtx, topic: str, runner: Runner) -> bool:
     res = runner.run([
         "gh", "pr", "list", "--repo", ctx.repo, "--state", "all",
@@ -340,12 +353,14 @@ def is_duplicate(ctx: RepoCtx, topic: str, runner: Runner) -> bool:
         rows = json.loads(res.stdout or "[]")
     except json.JSONDecodeError:
         return True
-    needle = topic.lower().strip()
-    if not needle:
+    # token-overlap (jaccard), not substring: a generic existing PR titled
+    # "fix" must not subsume every longer candidate, and vice versa.
+    want = _title_tokens(topic)
+    if not want:
         return False
     for row in rows:
-        title = str(row.get("title", "")).lower()
-        if needle in title or title in needle:
+        have = _title_tokens(str(row.get("title", "")))
+        if have and len(want & have) / len(want | have) >= 0.6:
             return True
     return False
 
@@ -399,7 +414,14 @@ def source_work_items(ctx: RepoCtx, count: int, runner: Runner,
                 chosen.append(it)
             if len(chosen) >= count:
                 break
-    return chosen[:count]
+    # uniquify slugs so two items can't collide on the same branch name.
+    seen: dict[str, int] = {}
+    unique: list[WorkItem] = []
+    for it in chosen[:count]:
+        n = seen.get(it.slug, 0)
+        seen[it.slug] = n + 1
+        unique.append(it if n == 0 else replace(it, slug=f"{it.slug}-{n + 1}"))
+    return unique
 
 
 # --- local test gate ------------------------------------------------------
@@ -468,6 +490,10 @@ def git_branch(ctx: RepoCtx, slug: str, runner: Runner) -> str:
 
 
 def git_diff(ctx: RepoCtx, runner: Runner) -> str:
+    # intent-to-add untracked files first, so a fix that *creates* a file (a new
+    # test/module/doc -- the most common change) shows up in `git diff HEAD`
+    # instead of being misread as "no diff".
+    runner.run(["git", "-C", str(ctx.clone_dir), "add", "-A", "-N"])
     res = runner.run(["git", "-C", str(ctx.clone_dir), "diff", "HEAD"])
     return res.stdout
 
@@ -517,14 +543,16 @@ def process_item(ctx: RepoCtx, item: WorkItem, fixer: Engine, verifier: Engine,
             body=item.body, guidance=guidance[:4000], revise=revise_note,
         )
         fixer.fix(cwd=str(ctx.clone_dir), prompt=prompt)
-        diff = git_diff(ctx, runner)
-        if not diff.strip():
+        if not git_diff(ctx, runner).strip():
             result.reason = "fixer produced no diff"
             return result
         gate_ok, gate_log = run_gate(ctx.clone_dir, runner)
         if not gate_ok:
             revise_note = f"\n\nthe test gate FAILED:\n{gate_log[-1500:]}\nfix it."
             continue
+        # re-capture AFTER the gate so the reviewed diff equals what gets
+        # committed -- a gate with autofix/codegen can mutate the tree.
+        diff = git_diff(ctx, runner)
         verdict = verifier.review(
             cwd=str(ctx.clone_dir), diff=diff,
             prompt=_REVIEW_PROMPT.format(repo=ctx.repo, title=item.title),
