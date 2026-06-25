@@ -925,8 +925,9 @@ def dual_solve_cmd(issue_url: str, claude_effort: str, codex_effort: str,
     gate is untouched — nothing is auto-approved.
     """
     from . import dual_solve as ds_mod
+    from .auto_pr import SubprocessRunner  # lives in auto_pr, not dual_solve
     store = _load_store()
-    runner = ds_mod.SubprocessRunner()
+    runner = SubprocessRunner()
     try:
         ds_mod._require_engines()
         root = ds_mod.repo_root(runner, Path.cwd())
@@ -959,6 +960,7 @@ def dual_solve_cmd(issue_url: str, claude_effort: str, codex_effort: str,
     ok = [c for c in candidates if c.ok]
     if not ok:
         raise click.ClickException("both engines failed; nothing to choose")
+    choice: str | None  # the [n]either branch assigns None; mypy needs the union
     if len(ok) == 1:
         survivor = ok[0]
         if not click.confirm(
@@ -986,7 +988,7 @@ def dual_solve_cmd(issue_url: str, claude_effort: str, codex_effort: str,
         return
     click.echo(f"kept {chosen.branch}", err=True)
     for pid in ids:
-        click.echo(f"proposed {pid} — review with `vouch approve {pid}`", err=True)
+        click.echo(f"proposed {pid} -- review with `vouch approve {pid}`", err=True)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
