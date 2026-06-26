@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}dual-solve · vouch{% endblock %}
+{% block content %}
+<div id="dual-solve-app"></div>
+<script type="module">
+  import { createApp } from "/static/vendor/vue.esm-browser.prod.js";
+  import App from "/static/dual_solve.js";
+  createApp(App).mount("#dual-solve-app");
+</script>
+{% endblock %}

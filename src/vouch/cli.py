@@ -2698,6 +2698,12 @@ def _resolve_auth_token(auth: str | None) -> str | None:
     show_default=True,
     help="Open the browser to the queue on startup.",
 )
+@click.option(
+    "--allow-dual-solve",
+    is_flag=True,
+    help="Mount the dual-solve runner SPA (spawns claude+codex; edit-only). "
+         "Off by default; the server must run inside the target git repo.",
+)
 def review_ui(
     bind: str,
     auth: str | None,
@@ -2705,6 +2711,7 @@ def review_ui(
     page_size: int | None,
     kb_root: str | None,
     open_browser: bool,
+    allow_dual_solve: bool,
 ) -> None:
     """Run the browser-based review console (issue #194).
 
@@ -2744,7 +2751,8 @@ def review_ui(
 
     try:
         app = web_pkg.create_app(
-            kb_root, auth_token=token, auth_label=reviewer, page_size=page_size
+            kb_root, auth_token=token, auth_label=reviewer, page_size=page_size,
+            allow_dual_solve=allow_dual_solve,
         )
     except (FileNotFoundError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
