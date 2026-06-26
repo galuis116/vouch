@@ -9,21 +9,6 @@
       ],
       "title": "PageStatus",
       "type": "string"
-    },
-    "PageType": {
-      "enum": [
-        "entity",
-        "concept",
-        "decision",
-        "workflow",
-        "session",
-        "index",
-        "log",
-        "report",
-        "source-summary"
-      ],
-      "title": "PageType",
-      "type": "string"
     }
   },
   "$id": "https://vouch.dev/schemas/page.schema.json",
@@ -58,6 +43,11 @@
       "title": "Id",
       "type": "string"
     },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
     "sources": {
       "items": {
         "type": "string"
@@ -81,8 +71,9 @@
       "type": "string"
     },
     "type": {
-      "$ref": "#/$defs/PageType",
-      "default": "concept"
+      "default": "concept",
+      "title": "Type",
+      "type": "string"
     },
     "updated_at": {
       "format": "date-time",

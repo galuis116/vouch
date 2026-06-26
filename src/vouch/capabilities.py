@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from . import __version__
 from .models import Capabilities
+from .openclaw.context_engine import describe_engine
 
 # The full method surface this implementation exposes. Keep this list in
 # sync with the MCP server + JSONL server registrations — `test_capabilities`
@@ -16,8 +17,11 @@ from .models import Capabilities
 METHODS = [
     "kb.capabilities",
     "kb.status",
+    "kb.stats",
     "kb.search",
+    "kb.neighbors",
     "kb.context",
+    "kb.synthesize",
     "kb.read_page",
     "kb.read_claim",
     "kb.read_entity",
@@ -36,6 +40,8 @@ METHODS = [
     "kb.propose_relation",
     "kb.approve",
     "kb.reject",
+    "kb.reject_extracted",
+    "kb.expire",
     "kb.supersede",
     "kb.contradict",
     "kb.archive",
@@ -44,6 +50,7 @@ METHODS = [
     "kb.source_verify",
     "kb.session_start",
     "kb.session_end",
+    "kb.volunteer_context",
     "kb.crystallize",
     "kb.index_rebuild",
     "kb.lint",
@@ -57,6 +64,11 @@ METHODS = [
     "kb.dedup_scan",
     "kb.eval_embeddings",
     "kb.embeddings_stats",
+    "kb.why",
+    "kb.trace",
+    "kb.impact",
+    "kb.graph_export",
+    "kb.provenance_rebuild",
 ]
 
 
@@ -74,5 +86,12 @@ def capabilities() -> Capabilities:
         methods=METHODS,
         retrieval=retrieval,
         review_gated=True,
-        transports=["mcp", "jsonl"],
+        transports=["mcp", "jsonl", "http"],
+        scoping={
+            "enabled": True,
+            "viewer_params": ["project", "agent"],
+            "env_vars": ["VOUCH_PROJECT", "VOUCH_AGENT"],
+            "config_path": "retrieval.scope",
+        },
+        context_engines=[describe_engine()],
     )

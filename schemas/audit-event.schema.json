@@ -27,6 +27,18 @@
       "title": "Event",
       "type": "string"
     },
+    "hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hash"
+    },
     "id": {
       "title": "Id",
       "type": "string"
@@ -37,6 +49,18 @@
       },
       "title": "Object Ids",
       "type": "array"
+    },
+    "prev_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prev Hash"
     },
     "reversible": {
       "default": true,

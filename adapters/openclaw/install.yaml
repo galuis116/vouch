@@ -1,0 +1,37 @@
+# OpenClaw adapter manifest.
+#
+# OpenClaw loads vouch as a bundle plugin via the repo-root
+# `openclaw.plugin.json` manifest (see README.md "Running vouch as an
+# OpenClaw plugin"). That covers the *deployment* side -- dropping the
+# vouch repo into an OpenClaw install. This adapter covers the
+# per-*project* side: a project that wants vouch enabled gets a small
+# set of OpenClaw-native files, mirroring the claude-code adapter's tiers.
+#
+# T1 = `.openclaw/plugins.json` -- declares the vouch plugin enabled for
+#      this project (the project-local analogue of running
+#      `openclaw plugin enable vouch`).
+# T2 = AGENTS.md fenced snippet pointing at the plugin manifest and
+#      summarizing the review-gate contract.
+# T3 = the same four slash commands the claude-code adapter ships,
+#      referenced in place rather than duplicated (see
+#      install_adapter.py's docstring; OpenClaw's loader bundles these
+#      from adapters/claude-code/ directly).
+# T4 = `.openclaw/policy.json` -- the trust boundary as project-local
+#      policy (review-gated writes, audit-logged lifecycle, confined fs).
+host: openclaw
+pretty: OpenClaw
+fence:
+  begin: "<!-- BEGIN vouch -->"
+  end: "<!-- END vouch -->"
+tiers:
+  T1:
+    - { src: plugins.json, dst: .openclaw/plugins.json }
+  T2:
+    - { src: AGENTS.md.snippet, dst: AGENTS.md, fenced_append: true }
+  T3:
+    - { src: ../claude-code/.claude/commands/vouch-recall.md, dst: .claude/commands/vouch-recall.md }
+    - { src: ../claude-code/.claude/commands/vouch-status.md, dst: .claude/commands/vouch-status.md }
+    - { src: ../claude-code/.claude/commands/vouch-resolve-issue.md, dst: .claude/commands/vouch-resolve-issue.md }
+    - { src: ../claude-code/.claude/commands/vouch-propose-from-pr.md, dst: .claude/commands/vouch-propose-from-pr.md }
+  T4:
+    - { src: policy.json, dst: .openclaw/policy.json }
