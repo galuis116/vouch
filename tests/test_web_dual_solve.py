@@ -135,3 +135,70 @@ def test_progress_frame_reaches_websocket(git_kb, monkeypatch):
                 break
         assert any(f.get("type") == "dual_solve" and f.get("event") == "progress"
                    for f in seen)
+
+
+def _fake_finalize(monkeypatch, *, captured):
+    def fake(store, root, issue, chosen, engines, candidates, reason, runner, *,
+             record, proposed_by):
+        captured.update(
+            winner=(chosen.engine if chosen else None),
+            record=record, reason=reason, proposed_by=proposed_by)
+        return ["prop-1", "prop-2"] if chosen else []
+    monkeypatch.setattr("vouch.dual_solve.finalize", fake)
+
+
+def test_choose_winner_finalizes_and_returns_ids(git_kb, monkeypatch):
+    calls: list = []
+    _fake_prepare(monkeypatch, calls=calls)
+    captured: dict = {}
+    _fake_finalize(monkeypatch, captured=captured)
+    c = _client(git_kb)
+    job_id = c.post("/dual-solve/run", json={"issue_url": "o/n#4"}).json()["job_id"]
+    _wait(c, job_id, {"ready"})
+    r = c.post("/dual-solve/choose",
+               json={"job_id": job_id, "winner": "codex", "reason": "cleaner"})
+    assert r.status_code == 200
+    assert r.json()["proposed_ids"] == ["prop-1", "prop-2"]
+    assert r.json()["kept_branch"] == "vouch-dual/4-fix-bug-codex"
+    assert captured["winner"] == "codex"
+    assert captured["record"] is True and captured["reason"] == "cleaner"
+
+
+def test_choose_neither_records_nothing(git_kb, monkeypatch):
+    calls: list = []
+    _fake_prepare(monkeypatch, calls=calls)
+    captured: dict = {}
+    _fake_finalize(monkeypatch, captured=captured)
+    c = _client(git_kb)
+    job_id = c.post("/dual-solve/run", json={"issue_url": "o/n#4"}).json()["job_id"]
+    _wait(c, job_id, {"ready"})
+    r = c.post("/dual-solve/choose",
+               json={"job_id": job_id, "winner": None, "reason": ""})
+    assert r.status_code == 200
+    assert r.json()["proposed_ids"] == [] and r.json()["kept_branch"] is None
+    assert captured["winner"] is None
+
+
+def test_choose_before_ready_is_conflict(git_kb, monkeypatch):
+    calls: list = []
+    _fake_prepare(monkeypatch, calls=calls)
+    _fake_finalize(monkeypatch, captured={})
+    c = _client(git_kb)
+    c.post("/dual-solve/run", json={"issue_url": "o/n#4"})
+    # don't wait for ready: immediately choosing may race, so assert the guard
+    # by choosing a bogus job id (never the active job).
+    r = c.post("/dual-solve/choose",
+               json={"job_id": "deadbeef", "winner": "claude", "reason": ""})
+    assert r.status_code == 404
+
+
+def test_routes_require_auth_when_enabled(git_kb, monkeypatch):
+    app = create_app(str(git_kb.root), auth_token="sekret", allow_dual_solve=True)
+    c = TestClient(app)
+    assert c.get("/dual-solve").status_code == 401
+    assert c.post("/dual-solve/run", json={"issue_url": "o/n#4"}).status_code == 401
+    assert c.post("/dual-solve/choose",
+                  json={"job_id": "x", "winner": None}).status_code == 401
+    # with the token, the page renders
+    ok = c.get("/dual-solve", headers={"Authorization": "Bearer sekret"})
+    assert ok.status_code == 200

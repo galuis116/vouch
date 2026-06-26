@@ -43,6 +43,12 @@ class _RunReq(BaseModel):
     codex_effort: str = "high"
 
 
+class _ChooseReq(BaseModel):
+    job_id: str
+    winner: str | None = None
+    reason: str = ""
+
+
 def _serialize(job: DualSolveJob) -> dict[str, Any]:
     return {
         "id": job.id,
@@ -145,3 +151,28 @@ def register(
         if job is None or job.id != job_id:
             raise HTTPException(404, "no such job")
         return _serialize(job)
+
+    @app.post("/dual-solve/choose", dependencies=guarded)
+    async def dual_solve_choose(req: _ChooseReq) -> dict[str, Any]:
+        job = getattr(app.state, "dual_solve_job", None)
+        if job is None or job.id != req.job_id:
+            raise HTTPException(404, "no such job")
+        if job.status != "ready":
+            raise HTTPException(409, f"job is {job.status}, not ready")
+        chosen = next((c for c in job.candidates if c.engine == req.winner), None)
+        job.status = "finalizing"
+        try:
+            ids = await run_in_threadpool(
+                ds.finalize, store, git_root, job.issue, chosen, job.engines,
+                job.candidates, req.reason or "", runner,
+                record=True, proposed_by=reviewer(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            job.status = "error"
+            job.error = str(exc)
+            raise HTTPException(500, f"finalize failed: {exc}") from exc
+        job.proposed_ids = ids
+        job.kept_branch = chosen.branch if chosen is not None else None
+        job.status = "done"
+        await hub.broadcast(_frame(job, "done"))
+        return {"kept_branch": job.kept_branch, "proposed_ids": ids}
