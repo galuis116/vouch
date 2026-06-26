@@ -22,6 +22,7 @@ from .auto_pr import Engine, Runner, slugify
 from .context import build_context_pack
 from .models import ContextPack, SourceType
 from .proposals import propose_claim
+from .sandbox import DEFAULT_SANDBOX_IMAGE, require_docker_sandbox
 from .storage import KBStore
 
 __all__ = [
@@ -41,14 +42,19 @@ __all__ = [
 ]
 
 
-def _require_engines() -> None:
+def _require_engines(*, sandboxed: bool = False,
+                     sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
+                     runner: Runner | None = None) -> None:
     """Fail fast before any worktree is created if a required binary is absent."""
-    missing = [b for b in ("git", "gh", "claude", "codex") if shutil.which(b) is None]
+    bins = ("git", "gh", "docker") if sandboxed else ("git", "gh", "claude", "codex")
+    missing = [b for b in bins if shutil.which(b) is None]
     if missing:
         raise RuntimeError(
             f"required CLI not on PATH: {', '.join(missing)} "
-            "(dual-solve needs git, gh, and both engines claude and codex)"
+            "(dual-solve needs git, gh, and either host engines or docker sandbox mode)"
         )
+    if sandboxed:
+        require_docker_sandbox(sandbox_image, runner=runner)
 
 
 @dataclass(frozen=True)

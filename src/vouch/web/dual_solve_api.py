@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import dual_solve as ds
 from ..auto_pr import SubprocessRunner
+from ..sandbox import DEFAULT_SANDBOX_IMAGE, DockerAgentRunner, require_docker_sandbox
 
 
 @dataclass
@@ -81,15 +82,24 @@ def register(
     render: Callable[[Request, str, dict[str, Any]], Any],
     reviewer: Callable[[], str],
     enabled: bool,
+    sandboxed: bool = False,
+    sandbox_image: str | None = None,
 ) -> None:
     """Mount the dual-solve routes. No-op unless ``enabled``."""
     if not enabled:
         return
-    runner = SubprocessRunner()
+    base_runner = SubprocessRunner()
+    sandbox_image = sandbox_image or DEFAULT_SANDBOX_IMAGE
     # fail fast at app-build time if we're not in a git repo: dual-solve can't
     # create worktrees otherwise.
-    git_root: Path = ds.repo_root(runner, store.root)
+    git_root: Path = ds.repo_root(base_runner, store.root)
     app.state.dual_solve_git_root = str(git_root)
+    if sandboxed:
+        require_docker_sandbox(sandbox_image, runner=base_runner)
+    runner = (
+        DockerAgentRunner(repo_root=git_root, runner=base_runner, image=sandbox_image)
+        if sandboxed else base_runner
+    )
 
     @app.get("/dual-solve", response_class=HTMLResponse, dependencies=guarded)
     def dual_solve_page(request: Request) -> Any:

@@ -272,6 +272,8 @@ def build_app(
     auth: AuthConfig | None = None,
     page_size: int = DEFAULT_PAGE_SIZE,
     allow_dual_solve: bool = False,
+    dual_solve_sandbox: bool = False,
+    dual_solve_sandbox_image: str | None = None,
 ) -> FastAPI:
     """FastAPI app bound to a KB root.
 
@@ -592,5 +594,6 @@ def build_app(
     _register_dual_solve(
         app, store=store, hub=hub, auth=auth, guarded=guarded,
         render=_tmpl, reviewer=reviewer, enabled=allow_dual_solve,
+        sandboxed=dual_solve_sandbox, sandbox_image=dual_solve_sandbox_image,
     )
     return app

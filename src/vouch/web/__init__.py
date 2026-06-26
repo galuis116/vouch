@@ -39,6 +39,8 @@ def create_app(  # type: ignore[no-untyped-def]
     auth_label: str = "web-reviewer",
     page_size: int | None = None,
     allow_dual_solve: bool = False,
+    dual_solve_sandbox: bool = False,
+    dual_solve_sandbox_image: str | None = None,
 ):
     """Build the FastAPI app for a given KB root. Lazy-imports the web stack.
 
@@ -55,6 +57,8 @@ def create_app(  # type: ignore[no-untyped-def]
         auth=auth,
         page_size=page_size if page_size is not None else DEFAULT_PAGE_SIZE,
         allow_dual_solve=allow_dual_solve,
+        dual_solve_sandbox=dual_solve_sandbox,
+        dual_solve_sandbox_image=dual_solve_sandbox_image,
     )
 
 

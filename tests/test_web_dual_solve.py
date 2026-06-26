@@ -50,6 +50,33 @@ def test_dual_solve_routes_absent_when_disabled(git_kb):
                   json={"job_id": "x", "winner": None}).status_code == 404
 
 
+def test_dual_solve_sandbox_runner_can_be_enabled(git_kb, monkeypatch):
+    from vouch.web import dual_solve_api as api
+
+    captured: dict = {}
+
+    class FakeSandboxRunner:
+        def __init__(self, *, repo_root, runner, image):
+            captured["repo_root"] = repo_root
+            captured["runner"] = runner
+            captured["image"] = image
+
+    monkeypatch.setattr(api, "require_docker_sandbox",
+                        lambda image, runner=None: captured.update(required=image))
+    monkeypatch.setattr(api, "DockerAgentRunner", FakeSandboxRunner)
+    app = create_app(
+        str(git_kb.root),
+        allow_dual_solve=True,
+        dual_solve_sandbox=True,
+        dual_solve_sandbox_image="agent-img",
+    )
+
+    assert app.state.dual_solve_git_root == str(git_kb.root)
+    assert captured["required"] == "agent-img"
+    assert captured["repo_root"] == git_kb.root
+    assert captured["image"] == "agent-img"
+
+
 def _fake_prepare(monkeypatch, *, calls):
     issue = ds.Issue("Fix bug", "body", number=4, url="u")
     cA = ds.Candidate("claude", "vouch-dual/4-fix-bug-claude", Path("/w/claude"),

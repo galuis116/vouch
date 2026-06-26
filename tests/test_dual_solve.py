@@ -397,6 +397,45 @@ def test_cli_dual_solve_json_is_noninteractive(monkeypatch, tmp_path):
     assert finalize_called["n"] == 0
 
 
+def test_cli_dual_solve_sandbox_uses_docker_runner(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+
+    from vouch.cli import cli
+
+    issue = ds.Issue("t", "b", number=1)
+    captured: dict = {}
+
+    class FakeSandboxRunner:
+        def __init__(self, *, repo_root, runner, image):
+            captured["repo_root"] = repo_root
+            captured["base_runner"] = runner
+            captured["image"] = image
+
+    def fake_require(*, sandboxed=False, sandbox_image="", runner=None):
+        captured["required"] = (sandboxed, sandbox_image, runner)
+
+    def fake_prepare(store, issue_ref, root, runner, **kwargs):
+        captured["runner"] = runner
+        return issue, [], {}
+
+    monkeypatch.setattr("vouch.dual_solve._require_engines", fake_require)
+    monkeypatch.setattr("vouch.dual_solve.repo_root", lambda r, c: tmp_path)
+    monkeypatch.setattr("vouch.dual_solve.prepare", fake_prepare)
+    monkeypatch.setattr("vouch.sandbox.DockerAgentRunner", FakeSandboxRunner)
+    monkeypatch.setattr("vouch.cli._load_store", lambda *a, **k: object())
+
+    r = CliRunner().invoke(
+        cli,
+        ["dual-solve", "o/n#1", "--sandbox", "--sandbox-image", "agent-img", "--json"],
+    )
+    assert r.exit_code == 0, r.output
+    assert captured["required"][0] is True
+    assert captured["required"][1] == "agent-img"
+    assert captured["repo_root"] == tmp_path
+    assert captured["image"] == "agent-img"
+    assert isinstance(captured["runner"], FakeSandboxRunner)
+
+
 def test_cli_dual_solve_aborts_when_both_fail(monkeypatch, tmp_path):
     from click.testing import CliRunner
 
