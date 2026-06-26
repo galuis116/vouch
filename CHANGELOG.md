@@ -7,6 +7,10 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- GitHub PR auto-labeling: a pull-request metadata-only labeler workflow now
+  applies vouch surface labels from `.github/labeler.yml`, keeps those labels
+  in sync as files change, and adds OpenClaw-style `size: XS` through
+  `size: XL` labels based on non-doc changed lines.
 - `vouch dual-solve <issue-url>` — run claude + codex on one github issue in
   isolated git worktrees, compare the two diffs, keep the branch you pick, and
   propose the chosen solution's rationale into the KB. A sibling tool to
