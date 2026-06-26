@@ -83,14 +83,34 @@ def test_run_starts_job_and_reaches_ready(git_kb, monkeypatch):
 
 
 def test_run_is_single_flight(git_kb, monkeypatch):
-    calls: list = []
-    _fake_prepare(monkeypatch, calls=calls)
+    from vouch.web import dual_solve_api as api
+    _fake_prepare(monkeypatch, calls=[])
     c = _client(git_kb)
-    first = c.post("/dual-solve/run", json={"issue_url": "o/n#4"})
-    assert first.status_code == 201
-    # a second run while the first is active is rejected
-    second = c.post("/dual-solve/run", json={"issue_url": "o/n#4"})
-    assert second.status_code == 409
+    # construct an in-flight job as the precondition -> a new run is rejected.
+    c.app.state.dual_solve_job = api.DualSolveJob(
+        id="active", issue_url="o/n#1", claude_effort="high",
+        codex_effort="high", status="running")
+    r = c.post("/dual-solve/run", json={"issue_url": "o/n#4"})
+    assert r.status_code == 409
+
+
+def test_run_replaces_abandoned_ready_job_and_cleans_up(git_kb, monkeypatch):
+    from pathlib import Path
+
+    from vouch.web import dual_solve_api as api
+    _fake_prepare(monkeypatch, calls=[])
+    cleaned = {"n": 0}
+    monkeypatch.setattr("vouch.dual_solve.cleanup",
+                        lambda *a, **k: cleaned.__setitem__("n", cleaned["n"] + 1))
+    c = _client(git_kb)
+    stale = api.DualSolveJob(
+        id="stale", issue_url="o/n#1", claude_effort="high",
+        codex_effort="high", status="ready")
+    stale.candidates = [ds.Candidate("claude", "b", Path("/w/c"), ok=True)]
+    c.app.state.dual_solve_job = stale
+    r = c.post("/dual-solve/run", json={"issue_url": "o/n#4"})
+    assert r.status_code == 201       # an abandoned ready job is replaceable
+    assert cleaned["n"] == 1          # its worktrees were cleaned up first
 
 
 def test_run_rejects_unparseable_issue(git_kb, monkeypatch):

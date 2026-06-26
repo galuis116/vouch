@@ -119,7 +119,7 @@ def register(
     @app.post("/dual-solve/run", status_code=201, dependencies=guarded)
     async def dual_solve_run(req: _RunReq) -> dict[str, str]:
         active = getattr(app.state, "dual_solve_job", None)
-        if active is not None and active.status not in ("done", "error"):
+        if active is not None and active.status in ("running", "finalizing"):
             raise HTTPException(409, "a dual-solve job is already running")
         try:
             ds.parse_issue_ref(req.issue_url)
