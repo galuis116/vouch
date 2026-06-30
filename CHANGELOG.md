@@ -6,6 +6,16 @@ All notable changes to vouch are documented here. Format follows
 
 ## [Unreleased]
 
+### Docs
+- example KBs now carry their own screenshots: `examples/README.md` and the
+  `tiny/` + `decision-log/` READMEs embed terminal renders of `vouch status`,
+  `search`, `show`, `audit`, and a supersession `diff` against the shipped
+  fixtures, so a reader can see what vouch looks like before installing it.
+  Images live under `docs/img/examples/` and are generated deterministically
+  from the fixtures by `docs/img/examples/render.py` (`make
+  examples-screenshots`); `tests/test_example_screenshots.py` asserts the
+  committed SVGs stay reproducible (#286).
+
 ### Added
 - GitHub PR auto-labeling: a pull-request metadata-only labeler workflow now
   applies vouch surface labels from `.github/labeler.yml`, keeps those labels

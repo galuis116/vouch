@@ -30,3 +30,19 @@ Compared to [tiny/](../tiny/), this example:
 (Files in this directory follow the same vouch/ layout as
 [../tiny/vouch/](../tiny/vouch/). For brevity the README points at
 patterns; browse the directory for the full set.)
+
+## See it in action
+
+After `cp -r examples/decision-log/vouch ./.vouch`, here's the supersession
+story on this fixture. (Images are rendered from the fixture by
+[`docs/img/examples/render.py`](../../docs/img/examples/render.py).)
+
+`vouch search free-tier` — both pricing claims surface, the old one marked
+`superseded`:
+
+<img src="../../docs/img/examples/decision-log-search.svg" alt="vouch search free-tier on the decision-log example" width="720">
+
+`vouch diff free-tier-100-req-superseded free-tier-500-req` — what changed
+across the supersession: status, evidence, and the decision text itself:
+
+<img src="../../docs/img/examples/decision-log-diff.svg" alt="vouch diff showing supersession on the decision-log example" width="760">

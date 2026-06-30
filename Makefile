@@ -1,4 +1,4 @@
-.PHONY: help install dev test test-cov lint format type check build clean
+.PHONY: help install dev test test-cov lint format type check build clean examples-screenshots
 
 PY ?= python
 PIP ?= $(PY) -m pip
@@ -15,6 +15,7 @@ help:
 	@echo "  make check         lint + type + test"
 	@echo "  make build         build sdist + wheel"
 	@echo "  make clean         remove caches, build artifacts, *.egg-info"
+	@echo "  make examples-screenshots  re-render docs/img/examples/*.svg"
 
 install:
 	$(PIP) install -e '.[dev]'
@@ -37,6 +38,9 @@ type:
 	$(PY) -m mypy src
 
 check: lint type test
+
+examples-screenshots:
+	$(PY) docs/img/examples/render.py
 
 build:
 	$(PY) -m pip install --upgrade build
