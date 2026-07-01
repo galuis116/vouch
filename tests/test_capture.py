@@ -325,3 +325,203 @@ def test_adapter_settings_wires_capture_hooks() -> None:
     assert any("capture observe" in c for c in commands("PostToolUse"))
     assert any("capture finalize" in c for c in commands("SessionEnd"))
     assert any("capture banner" in c for c in commands("SessionStart"))
+
+
+def test_is_stale_buffer_with_recent_file(tmp_path):
+    """Recent file should not be stale."""
+    import time as time_mod
+    f = tmp_path / "recent.jsonl"
+    f.write_text("test")
+    now = time_mod.time()
+    # File created 30 seconds ago; max_age=3600
+    assert not cap.is_stale_buffer(f, max_age_seconds=3600, now_timestamp=now)
+
+
+def test_is_stale_buffer_with_old_file(tmp_path):
+    """File older than max_age should be stale."""
+    import os
+    import time as time_mod
+    f = tmp_path / "old.jsonl"
+    f.write_text("test")
+    old_time = time_mod.time() - 7200  # 2 hours ago
+    os.utime(f, (old_time, old_time))  # Set mtime to 2 hours ago
+    now = time_mod.time()
+    assert cap.is_stale_buffer(f, max_age_seconds=3600, now_timestamp=now)
+
+
+def test_is_stale_buffer_with_exact_boundary(tmp_path):
+    """File at exact max_age boundary should not be stale (>=)."""
+    import os
+    import time as time_mod
+    f = tmp_path / "boundary.jsonl"
+    f.write_text("test")
+    exact_time = time_mod.time() - 3600  # Exactly 1 hour ago
+    os.utime(f, (exact_time, exact_time))
+    now = exact_time + 3600
+    assert not cap.is_stale_buffer(f, max_age_seconds=3600, now_timestamp=now)
+
+
+def _make_store(tmp_path: Path) -> KBStore:
+    """Helper to create a KBStore for testing."""
+    return KBStore.init(tmp_path)
+
+
+def test_finalize_all_except_skips_current_session(tmp_path):
+    """Should not finalize the current session buffer."""
+    store = _make_store(tmp_path)
+    sess_id = "current-session"
+
+    # Create a current session buffer with observations
+    path = cap.buffer_path(store, sess_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+
+    result = cap.finalize_all_except(
+        store, sess_id, max_age_seconds=3600.0
+    )
+
+    assert result["skipped_current"] == [sess_id]
+    assert path.exists()  # Not removed
+
+
+def test_finalize_all_except_finalizes_old_buffer(tmp_path):
+    """Should finalize buffers older than max_age, except current session."""
+    import os
+    import time as time_mod
+    store = _make_store(tmp_path)
+    current_sess = "current"
+    old_sess = "old-session"
+
+    # Create old buffer (2 hours old)
+    old_path = cap.buffer_path(store, old_sess)
+    old_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+    old_mtime = time_mod.time() - 7200
+    os.utime(old_path, (old_mtime, old_mtime))
+
+    # Create current buffer (recent)
+    curr_path = cap.buffer_path(store, current_sess)
+    curr_path.write_text('{"ts": 2.0, "tool": "Write", "summary": "test2"}\n')
+
+    result = cap.finalize_all_except(
+        store, current_sess, max_age_seconds=3600.0
+    )
+
+    assert old_sess in result["finalized"]
+    assert current_sess in result["skipped_current"]
+    assert not old_path.exists()  # Removed after finalize
+    assert curr_path.exists()  # Current session untouched
+
+
+def test_finalize_all_except_skips_recent_buffers(tmp_path):
+    """Should not finalize buffers younger than max_age."""
+    import os
+    import time as time_mod
+    store = _make_store(tmp_path)
+    current_sess = "current"
+    recent_sess = "recent-other"
+
+    # Create recent buffer (30 minutes old)
+    recent_path = cap.buffer_path(store, recent_sess)
+    recent_path.parent.mkdir(parents=True, exist_ok=True)
+    recent_path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+    recent_mtime = time_mod.time() - 1800
+    os.utime(recent_path, (recent_mtime, recent_mtime))
+
+    result = cap.finalize_all_except(
+        store, current_sess, max_age_seconds=3600.0
+    )
+
+    assert recent_sess in result["skipped_recent"]
+    assert recent_path.exists()  # Not removed
+
+
+def test_finalize_all_except_multiple_buffers(tmp_path):
+    """Should handle multiple old and recent buffers correctly."""
+    import os
+    import time as time_mod
+    store = _make_store(tmp_path)
+    current_sess = "current"
+
+    # Create 3 old buffers, 2 recent buffers
+    old_sesses = ["old1", "old2", "old3"]
+    recent_sesses = ["recent1", "recent2"]
+
+    now = time_mod.time()
+    for sid in old_sesses:
+        path = cap.buffer_path(store, sid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+        old_mtime = now - 7200  # 2 hours ago
+        os.utime(path, (old_mtime, old_mtime))
+
+    for sid in recent_sesses:
+        path = cap.buffer_path(store, sid)
+        path.write_text('{"ts": 2.0, "tool": "Read", "summary": "test"}\n')
+        recent_mtime = now - 600  # 10 minutes ago
+        os.utime(path, (recent_mtime, recent_mtime))
+
+    # Create current session buffer
+    curr_path = cap.buffer_path(store, current_sess)
+    curr_path.write_text('{"ts": 3.0, "tool": "Write", "summary": "test"}\n')
+
+    result = cap.finalize_all_except(
+        store, current_sess, max_age_seconds=3600.0, now_timestamp=now
+    )
+
+    assert set(result["finalized"]) == set(old_sesses)
+    assert set(result["skipped_recent"]) == set(recent_sesses)
+    assert result["skipped_current"] == [current_sess]
+
+    # Verify old buffers are removed, others exist
+    for sid in old_sesses:
+        assert not cap.buffer_path(store, sid).exists()
+    for sid in [*recent_sesses, current_sess]:
+        assert cap.buffer_path(store, sid).exists()
+
+
+def test_finalize_all_except_empty_captures_dir(tmp_path):
+    """Should handle empty or missing captures directory gracefully."""
+    store = _make_store(tmp_path)
+    result = cap.finalize_all_except(
+        store, "current-session", max_age_seconds=3600.0
+    )
+
+    assert result["finalized"] == []
+    assert result["skipped_recent"] == []
+    assert result["skipped_current"] == []
+
+
+def test_finalize_all_except_returns_proposal_ids(tmp_path):
+    """finalize_all_except should return proposal IDs of finalized buffers."""
+    import os
+    import time as time_mod
+    store = _make_store(tmp_path)
+    old_sess = "old-session"
+    current_sess = "current"
+
+    # Create old buffer with enough observations
+    old_path = cap.buffer_path(store, old_sess)
+    old_path.parent.mkdir(parents=True, exist_ok=True)
+    observations = [
+        '{"ts": 1.0, "tool": "Read", "summary": "test1"}',
+        '{"ts": 2.0, "tool": "Read", "summary": "test2"}',
+        '{"ts": 3.0, "tool": "Read", "summary": "test3"}',
+    ]
+    old_path.write_text("\n".join(observations) + "\n")
+    old_mtime = time_mod.time() - 7200
+    os.utime(old_path, (old_mtime, old_mtime))
+
+    # Create current session buffer
+    curr_path = cap.buffer_path(store, current_sess)
+    curr_path.write_text('{"ts": 4.0, "tool": "Write", "summary": "test"}\n')
+
+    result = cap.finalize_all_except(
+        store, current_sess, max_age_seconds=3600.0
+    )
+
+    assert old_sess in result["finalized"]
+    # Verify a proposal was created
+    from vouch.models import ProposalStatus
+    pending = store.list_proposals(ProposalStatus.PENDING)
+    assert len(pending) > 0

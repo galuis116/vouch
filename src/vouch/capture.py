@@ -14,6 +14,7 @@ import json
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -280,3 +281,74 @@ def pending_count(store: KBStore) -> int:
         1 for p in store.list_proposals(ProposalStatus.PENDING)
         if p.proposed_by == CAPTURE_ACTOR
     )
+
+
+def is_stale_buffer(
+    path: Path,
+    *,
+    max_age_seconds: float = 3600.0,
+    now_timestamp: float | None = None,
+) -> bool:
+    """Check if a buffer file's mtime is older than max_age_seconds."""
+    if not path.exists():
+        return False
+    now = now_timestamp if now_timestamp is not None else time.time()
+    mtime = path.stat().st_mtime
+    age = now - mtime
+    return age > max_age_seconds
+
+
+def finalize_all_except(
+    store: KBStore,
+    current_session_id: str,
+    *,
+    max_age_seconds: float = 3600.0,
+    cwd: Path | None = None,
+    now_timestamp: float | None = None,
+) -> dict[str, Any]:
+    """Finalize all buffers except current_session_id, if they're older than max_age.
+
+    Returns dict with keys:
+      - finalized: [session_id1, session_id2, ...]  session IDs that were finalized
+      - skipped_recent: [id3, id4, ...]  sessions too recent to finalize
+      - skipped_current: [id5]  the current session (always skipped)
+    """
+    finalized: list[str] = []
+    skipped_recent: list[str] = []
+    skipped_current: list[str] = []
+    now = now_timestamp if now_timestamp is not None else time.time()
+
+    caps_dir = captures_dir(store)
+    if not caps_dir.exists():
+        return {
+            "finalized": finalized,
+            "skipped_recent": skipped_recent,
+            "skipped_current": skipped_current,
+        }
+
+    for path in sorted(caps_dir.glob("*.jsonl")):
+        # Extract session ID from filename (e.g., "session-id.jsonl" -> "session-id")
+        session_id = path.stem
+
+        if session_id == current_session_id:
+            skipped_current.append(session_id)
+            continue
+
+        if is_stale_buffer(path, max_age_seconds=max_age_seconds, now_timestamp=now):
+            try:
+                finalize(
+                    store, session_id, cwd=cwd,
+                    generated_at=datetime.now(UTC).isoformat(),
+                )
+                finalized.append(session_id)
+            except Exception:
+                # Never let a finalize failure break the scan
+                pass
+        else:
+            skipped_recent.append(session_id)
+
+    return {
+        "finalized": finalized,
+        "skipped_recent": skipped_recent,
+        "skipped_current": skipped_current,
+    }
