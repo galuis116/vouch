@@ -244,14 +244,23 @@ def finalize(
     generated_at: str | None = None,
     config: CaptureConfig | None = None,
 ) -> dict[str, Any]:
-    """Roll a session buffer into one PENDING summary proposal. No approve()."""
+    """Roll a session buffer into one PENDING summary proposal. No approve().
+
+    If cwd is None (e.g., when finalizing orphaned buffers with unknown origin),
+    git changes are not included. Otherwise, git changes from cwd are included.
+    """
     cfg = config or load_config(store)
     path = buffer_path(store, session_id)
     observations = _read_observations(path)
     if not cfg.enabled:
         return {"captured": len(observations), "summary_proposal_id": None,
                 "skipped": "disabled"}
-    changed_files, git_stat = _git_changes(cwd or Path.cwd())
+    # Only include git context if cwd is explicitly provided (known origin)
+    # For cleanup of orphaned buffers, cwd=None, so skip git context
+    if cwd is not None:
+        changed_files, git_stat = _git_changes(cwd)
+    else:
+        changed_files, git_stat = [], ""
     total = len(observations) + len(changed_files)
     if total < cfg.min_observations:
         if path.exists():

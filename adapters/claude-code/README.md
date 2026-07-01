@@ -69,7 +69,7 @@ window, vouch proposes the captured knowledge to the KB for review.
    `.vouch/captures/<session-id>.jsonl` (gitignored).
 
 2. **Cleanup on session start**: When you start a new session, any
-   unfinalzed buffers from previous sessions (>1 hour old) are
+   unfinalized buffers from previous sessions (>1 hour old) are
    automatically finalized and proposed.
 
 3. **Finalize on window close**: When the VS Code window closes, the
