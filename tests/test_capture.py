@@ -87,6 +87,104 @@ def test_summarize_tool_bash_flags_error() -> None:
     assert "failed" in obs["summary"].lower()
 
 
+def test_summarize_tool_read_grep_web_task() -> None:
+    assert "a.py" in cap.summarize_tool("Read", {"file_path": "/x/a.py"}, "")["summary"]
+    assert "TODO" in cap.summarize_tool("Grep", {"pattern": "TODO"}, "")["summary"]
+    web = cap.summarize_tool("WebFetch", {"url": "https://example.com"}, "")
+    assert "example.com" in web["summary"]
+    assert cap.summarize_tool("Task", {}, "")["summary"] == "Task completed"
+
+
+def test_observe_stores_cmd_field(store: KBStore) -> None:
+    cap.observe(store, "s1", tool="Bash", summary="Ran: ls", cmd="ls -la", now=1.0)
+    line = cap.buffer_path(store, "s1").read_text()
+    assert "ls -la" in line
+
+
+def test_load_config_malformed_yaml_falls_back(store: KBStore) -> None:
+    store.config_path.write_text("capture: [unclosed\n")
+    assert cap.load_config(store).enabled is True  # default, not a crash
+
+
+def test_load_config_non_dict_yaml_falls_back(store: KBStore) -> None:
+    store.config_path.write_text("just a string\n")
+    assert cap.load_config(store).min_observations == 3
+
+
+def test_load_config_capture_not_a_mapping(store: KBStore) -> None:
+    store.config_path.write_text("capture: 42\n")
+    assert cap.load_config(store).enabled is True
+
+
+def test_read_observations_skips_blank_and_bad_lines(store: KBStore) -> None:
+    p = cap.buffer_path(store, "s1")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('\n{"ts": 1, "tool": "Edit", "summary": "ok"}\nnot-json\n')
+    obs = cap._read_observations(p)
+    assert len(obs) == 1
+    assert obs[0]["summary"] == "ok"
+
+
+def test_git_changes_in_a_real_repo(tmp_path: Path) -> None:
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=tmp_path, check=True, capture_output=True, text=True,
+        )
+
+    try:
+        git("init")
+    except (OSError, subprocess.CalledProcessError):
+        import pytest
+        pytest.skip("git not available")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    git("add", "a.py")
+    git("commit", "-m", "init")
+    (tmp_path / "a.py").write_text("x = 2\n")  # modify tracked file
+    files, stat = cap._git_changes(tmp_path)
+    assert "a.py" in files
+    assert "a.py" in stat
+
+
+def test_git_changes_swallows_subprocess_error(tmp_path: Path, monkeypatch) -> None:
+    def boom(*a, **k):
+        raise OSError("git missing")
+
+    monkeypatch.setattr(cap.subprocess, "run", boom)
+    assert cap._git_changes(tmp_path) == ([], "")
+
+
+def test_git_changes_stat_error_returns_files_without_stat(tmp_path: Path, monkeypatch) -> None:
+    calls = {"n": 0}
+
+    class _R:
+        stdout = "a.py\n"
+
+    def run(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _R()  # first call (names) succeeds
+        raise OSError("stat failed")  # second call (stat) blows up
+
+    monkeypatch.setattr(cap.subprocess, "run", run)
+    files, stat = cap._git_changes(tmp_path)
+    assert files == ["a.py"]
+    assert stat == ""
+
+
+def test_build_summary_body_renders_git_and_commands() -> None:
+    obs = [{"ts": 1.0, "tool": "Bash", "summary": "Ran: pytest", "cmd": "pytest -q"}]
+    _, body = cap.build_summary_body(
+        "s1", obs, ["a.py"], "a.py | 2 +-", project="proj", generated_at="2026-07-01"
+    )
+    assert "## git changes" in body
+    assert "pytest -q" in body
+    assert "## notable commands" in body
+    assert "proj" in body
+
+
 def _seed(store: KBStore, sid: str, n: int) -> None:
     for i in range(n):
         cap.observe(store, sid, tool="Edit", summary=f"Edited f{i}.py", now=float(i))

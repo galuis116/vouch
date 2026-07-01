@@ -78,6 +78,21 @@ def test_starter_config_has_recall_namespace() -> None:
     assert _starter_config()["recall"]["enabled"] is True
 
 
+def test_load_config_malformed_yaml_falls_back(store: KBStore) -> None:
+    store.config_path.write_text("recall: [unclosed\n", encoding="utf-8")
+    assert recall.load_config(store).enabled is True
+
+
+def test_load_config_non_dict_yaml_falls_back(store: KBStore) -> None:
+    store.config_path.write_text("plain string\n", encoding="utf-8")
+    assert recall.load_config(store).max_chars == recall.DEFAULT_MAX_CHARS
+
+
+def test_load_config_recall_not_a_mapping(store: KBStore) -> None:
+    store.config_path.write_text("recall: 7\n", encoding="utf-8")
+    assert recall.load_config(store).enabled is True
+
+
 def test_cli_recall_emits_digest(store: KBStore) -> None:
     from click.testing import CliRunner
 

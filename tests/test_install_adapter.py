@@ -175,6 +175,64 @@ def test_settings_json_written_fresh_when_absent(tmp_path: Path) -> None:
     assert ".claude/settings.json" not in result.merged
 
 
+def test_settings_json_malformed_existing_is_skipped(tmp_path: Path) -> None:
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{ not valid json ")
+    before = (tmp_path / ".claude" / "settings.json").read_text()
+    result = install("claude-code", target=tmp_path, tier="T4")
+    # unreadable user file is left untouched, not clobbered
+    assert (tmp_path / ".claude" / "settings.json").read_text() == before
+    assert ".claude/settings.json" in result.skipped
+    assert ".claude/settings.json" not in result.merged
+
+
+def test_settings_json_non_object_existing_is_skipped(tmp_path: Path) -> None:
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("[1, 2, 3]")
+    result = install("claude-code", target=tmp_path, tier="T4")
+    assert ".claude/settings.json" in result.skipped
+
+
+def test_merge_settings_coerces_non_dict_fields() -> None:
+    from vouch.install_adapter import _merge_settings
+
+    dst = {"permissions": "oops", "hooks": "also-oops"}
+    src = {
+        "permissions": {"allow": ["mcp__vouch__kb_status"]},
+        "hooks": {"PostToolUse": [
+            {"matcher": "*", "hooks": [{"type": "command", "command": "vouch capture observe"}]}
+        ]},
+    }
+    changed = _merge_settings(src, dst)
+    assert changed is True
+    assert "mcp__vouch__kb_status" in dst["permissions"]["allow"]
+    cmds = [h["command"] for g in dst["hooks"]["PostToolUse"] for h in g["hooks"]]
+    assert "vouch capture observe" in cmds
+
+
+def test_merge_settings_ignores_malformed_src_groups() -> None:
+    from vouch.install_adapter import _merge_settings
+
+    dst: dict = {}
+    # a non-list event value and a non-dict group are both skipped defensively
+    src = {"hooks": {"BadEvent": "not-a-list", "PostToolUse": ["not-a-dict"]}}
+    assert _merge_settings(src, dst) is False  # nothing addable → no change
+
+
+def test_merge_settings_new_matcher_group_when_none_matches() -> None:
+    from vouch.install_adapter import _merge_settings
+
+    dst = {"hooks": {"PostToolUse": [
+        {"matcher": "Edit", "hooks": [{"type": "command", "command": "user-hook"}]}
+    ]}}
+    src = {"hooks": {"PostToolUse": [
+        {"matcher": "*", "hooks": [{"type": "command", "command": "vouch capture observe"}]}
+    ]}}
+    assert _merge_settings(src, dst) is True
+    matchers = [g.get("matcher") for g in dst["hooks"]["PostToolUse"]]
+    assert "Edit" in matchers and "*" in matchers  # user group kept, ours added
+
+
 def test_install_claude_md_appends_when_existing_unfenced(tmp_path: Path) -> None:
     """User has their own CLAUDE.md — our snippet appends inside a fence so
     their content is untouched and we can detect ourselves on re-install."""
