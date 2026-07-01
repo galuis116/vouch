@@ -79,6 +79,11 @@ def _starter_config() -> dict[str, Any]:
             "require_human_approval": True,
             "expire_pending_after_days": 90,
         },
+        "capture": {
+            # auto-capture claude code sessions into pending summaries.
+            "enabled": True,
+            "min_observations": 3,
+        },
         "retrieval": {
             # auto = embedding -> fts5 -> substring; or pin one of
             # embedding | fts5 | substring. See context._retrieve.
@@ -221,8 +226,8 @@ class KBStore:
             schema_version_file.write_text(SCHEMA_VERSION + "\n")
         gi = kb.kb_dir / ".gitignore"
         if not gi.exists():
-            # state.db is derived; proposed/ is the agent's scratch space.
-            gi.write_text("proposed/\nstate.db\nstate.db-*\n")
+            # state.db is derived; proposed/ and captures/ are scratch space.
+            gi.write_text("proposed/\ncaptures/\nstate.db\nstate.db-*\n")
         return kb
 
     # --- paths -------------------------------------------------------------
