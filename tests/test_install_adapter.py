@@ -113,6 +113,68 @@ def test_install_claude_code_is_idempotent(tmp_path: Path) -> None:
     }
 
 
+def test_settings_json_merges_into_existing(tmp_path: Path) -> None:
+    """User already has .claude/settings.json — vouch merges its hooks and
+    permission allowlist in without clobbering the user's content."""
+    settings_dir = tmp_path / ".claude"
+    settings_dir.mkdir()
+    (settings_dir / "settings.json").write_text(json.dumps({
+        "permissions": {"allow": ["Bash(ls:*)"]},
+        "hooks": {
+            "SessionStart": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "my-own-hook"}]}
+            ]
+        },
+    }))
+    result = install("claude-code", target=tmp_path, tier="T4")
+    merged = json.loads((settings_dir / "settings.json").read_text())
+
+    # user content preserved
+    assert "Bash(ls:*)" in merged["permissions"]["allow"]
+    start_cmds = [h["command"] for g in merged["hooks"]["SessionStart"] for h in g["hooks"]]
+    assert "my-own-hook" in start_cmds
+
+    # vouch content merged in
+    assert "mcp__vouch__kb_status" in merged["permissions"]["allow"]
+    assert any("capture banner" in c for c in start_cmds)
+    post = [h["command"] for g in merged["hooks"].get("PostToolUse", []) for h in g["hooks"]]
+    end = [h["command"] for g in merged["hooks"].get("SessionEnd", []) for h in g["hooks"]]
+    assert any("capture observe" in c for c in post)
+    assert any("capture finalize" in c for c in end)
+
+    assert ".claude/settings.json" in result.merged
+    assert ".claude/settings.json" not in result.skipped
+    assert ".claude/settings.json" not in result.written
+
+
+def test_settings_json_merge_is_idempotent(tmp_path: Path) -> None:
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"hooks": {}}))
+    install("claude-code", target=tmp_path, tier="T4")
+    first = (tmp_path / ".claude" / "settings.json").read_text()
+    second = install("claude-code", target=tmp_path, tier="T4")
+    after = (tmp_path / ".claude" / "settings.json").read_text()
+
+    assert first == after  # no change on re-run
+    assert ".claude/settings.json" in second.skipped
+    assert ".claude/settings.json" not in second.merged
+
+    data = json.loads(after)
+    observe_cmds = [
+        h["command"]
+        for g in data["hooks"]["PostToolUse"]
+        for h in g["hooks"]
+        if "capture observe" in h["command"]
+    ]
+    assert len(observe_cmds) == 1  # not duplicated
+
+
+def test_settings_json_written_fresh_when_absent(tmp_path: Path) -> None:
+    result = install("claude-code", target=tmp_path, tier="T4")
+    assert ".claude/settings.json" in result.written
+    assert ".claude/settings.json" not in result.merged
+
+
 def test_install_claude_md_appends_when_existing_unfenced(tmp_path: Path) -> None:
     """User has their own CLAUDE.md — our snippet appends inside a fence so
     their content is untouched and we can detect ourselves on re-install."""

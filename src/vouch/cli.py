@@ -2628,11 +2628,14 @@ def install_mcp(
         click.echo(f"  + {f}")
     for f in result.appended:
         click.echo(f"  ~ {f}  (appended fenced block)")
+    for f in result.merged:
+        click.echo(f"  ~ {f}  (merged into existing)")
     for f in result.skipped:
         click.echo(f"  · {f}  (already present)")
     click.echo(
         f"Done — {len(result.written)} written, "
-        f"{len(result.appended)} appended, {len(result.skipped)} skipped "
+        f"{len(result.appended)} appended, {len(result.merged)} merged, "
+        f"{len(result.skipped)} skipped "
         f"under {target}"
     )
 

@@ -23,4 +23,4 @@ tiers:
     - { src: .claude/commands/vouch-resolve-issue.md, dst: .claude/commands/vouch-resolve-issue.md }
     - { src: .claude/commands/vouch-propose-from-pr.md, dst: .claude/commands/vouch-propose-from-pr.md }
   T4:
-    - { src: .claude/settings.json, dst: .claude/settings.json }
+    - { src: .claude/settings.json, dst: .claude/settings.json, json_merge: true }
