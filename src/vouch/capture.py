@@ -10,8 +10,11 @@ intact. See docs/superpowers/specs/2026-07-01-vouch-session-autocapture-design.m
 
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -58,3 +61,103 @@ def captures_dir(store: KBStore) -> Path:
 def buffer_path(store: KBStore, session_id: str) -> Path:
     safe = session_id.replace("/", "_").replace("..", "_").strip() or "unknown"
     return captures_dir(store) / f"{safe}.jsonl"
+
+
+_OBSERVED_TOOLS = frozenset({
+    "Read", "Edit", "Write", "Update", "Bash",
+    "Grep", "Glob", "WebFetch", "WebSearch", "Task", "NotebookEdit",
+})
+
+
+def _read_observations(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def _dedup_key(tool: str, summary: str) -> str:
+    return f"{tool}\x00{summary}"
+
+
+def observe(
+    store: KBStore,
+    session_id: str,
+    *,
+    tool: str,
+    summary: str,
+    files: list[str] | None = None,
+    cmd: str | None = None,
+    now: float | None = None,
+    config: CaptureConfig | None = None,
+) -> bool:
+    """Append one observation to the session buffer. Returns True if written."""
+    cfg = config or load_config(store)
+    if not cfg.enabled:
+        return False
+    ts = time.time() if now is None else now
+    path = buffer_path(store, session_id)
+    key = _dedup_key(tool, summary)
+    for obs in reversed(_read_observations(path)):
+        if ts - float(obs.get("ts", 0.0)) > cfg.dedup_window_seconds:
+            break
+        if _dedup_key(str(obs.get("tool", "")), str(obs.get("summary", ""))) == key:
+            return False
+    record: dict[str, Any] = {"ts": ts, "tool": tool, "summary": summary}
+    if files:
+        record["files"] = files
+    if cmd:
+        record["cmd"] = cmd
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\n")
+    return True
+
+
+def _basename(path: str) -> str:
+    return path.rsplit("/", 1)[-1] or path
+
+
+def summarize_tool(
+    tool_name: str | None,
+    tool_input: dict[str, Any] | None,
+    tool_response: object,
+) -> dict[str, Any] | None:
+    """Turn a PostToolUse payload into a compact observation, or None to skip."""
+    if not tool_name or tool_name not in _OBSERVED_TOOLS:
+        return None
+    ti = tool_input or {}
+    out: dict[str, Any] = {"tool": tool_name}
+    fp = ti.get("file_path")
+    if isinstance(fp, str) and fp:
+        out["files"] = [fp]
+    if tool_name in {"Read", "Edit", "Write", "Update", "NotebookEdit"}:
+        name = _basename(fp) if isinstance(fp, str) and fp else "file"
+        verb = {"Read": "Read", "Write": "Created"}.get(tool_name, "Edited")
+        out["summary"] = f"{verb} {name}"
+    elif tool_name == "Bash":
+        cmd = ti.get("command")
+        short = str(cmd).splitlines()[0][:60] if cmd else "command"
+        if cmd:
+            out["cmd"] = str(cmd)[:200]
+        text = str(tool_response).lower()
+        failed = "error" in text or "failed" in text
+        out["summary"] = f"Command failed: {short}" if failed else f"Ran: {short}"
+    elif tool_name in {"Grep", "Glob"}:
+        out["summary"] = f"{tool_name} {str(ti.get('pattern', ''))[:40]}"
+    elif tool_name in {"WebFetch", "WebSearch"}:
+        target = ti.get("url") or ti.get("query") or ""
+        out["summary"] = f"Fetched: {str(target)[:60]}"
+    else:  # Task
+        out["summary"] = f"{tool_name} completed"
+    return out
