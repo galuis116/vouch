@@ -327,6 +327,80 @@ def test_adapter_settings_wires_capture_hooks() -> None:
     assert any("capture banner" in c for c in commands("SessionStart"))
 
 
+def test_capture_finalize_all_cmd_with_old_buffers(tmp_path: Path, monkeypatch) -> None:
+    """CLI command should finalize old buffers and emit JSON."""
+    import os
+    import time as time_mod
+
+    store = _make_store(tmp_path)
+    current_sess = "current"
+    old_sess = "old-session"
+
+    # Create old buffer
+    old_path = cap.buffer_path(store, old_sess)
+    old_path.parent.mkdir(parents=True, exist_ok=True)
+    observations = [
+        '{"ts": 1.0, "tool": "Read", "summary": "test1"}',
+        '{"ts": 2.0, "tool": "Read", "summary": "test2"}',
+        '{"ts": 3.0, "tool": "Read", "summary": "test3"}',
+    ]
+    old_path.write_text("\n".join(observations) + "\n")
+    old_mtime = time_mod.time() - 7200
+    os.utime(old_path, (old_mtime, old_mtime))
+
+    # Create current buffer
+    curr_path = cap.buffer_path(store, current_sess)
+    curr_path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+
+    # Run the CLI command
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "capture", "finalize-all",
+        "--session-id", current_sess,
+        "--max-age-seconds", "3600",
+    ], env={"VOUCH_KB_PATH": str(store.kb_dir)})
+
+    assert result.exit_code == 0
+    output = _json.loads(result.output)
+    assert old_sess in output["finalized"]
+    assert current_sess in output["skipped_current"]
+
+
+def test_capture_finalize_all_cmd_reads_session_from_env(tmp_path: Path, monkeypatch) -> None:
+    """CLI command should fall back to VOUCH_SESSION_ID env var."""
+    store = _make_store(tmp_path)
+    current_sess = "from-env"
+
+    # Create current session buffer
+    curr_path = cap.buffer_path(store, current_sess)
+    curr_path.parent.mkdir(parents=True, exist_ok=True)
+    curr_path.write_text('{"ts": 1.0, "tool": "Read", "summary": "test"}\n')
+
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "capture", "finalize-all"
+    ], env={
+        "VOUCH_KB_PATH": str(store.kb_dir),
+        "VOUCH_SESSION_ID": current_sess,
+    })
+
+    assert result.exit_code == 0
+    output = _json.loads(result.output)
+    assert current_sess in output["skipped_current"]
+
+
+def test_capture_finalize_all_cmd_silent_on_no_kb(tmp_path: Path, monkeypatch) -> None:
+    """CLI command should silently succeed if KB not found."""
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "capture", "finalize-all",
+        "--session-id", "test",
+    ], env={"VOUCH_KB_PATH": str(tmp_path / "nonexistent")})
+
+    # Should exit 0, not fail
+    assert result.exit_code == 0
+
+
 def test_is_stale_buffer_with_recent_file(tmp_path):
     """Recent file should not be stale."""
     import time as time_mod

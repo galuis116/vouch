@@ -1390,6 +1390,29 @@ def capture_finalize_cmd(session_id: str | None) -> None:
     _emit_json(result)
 
 
+@capture.command("finalize-all")
+@click.option("--session-id", default=None, help="Current session id (else env VOUCH_SESSION_ID).")
+@click.option("--max-age-seconds", type=float, default=3600.0, help="Max age in seconds.")
+def capture_finalize_all_cmd(session_id: str | None, max_age_seconds: float) -> None:
+    """Finalize all capture buffers except current session (SessionStart cleanup)."""
+    sid = session_id or os.environ.get("VOUCH_SESSION_ID") or ""
+    if not sid:
+        # No session ID provided; silently succeed
+        _emit_json({"finalized": [], "skipped_recent": [], "skipped_current": []})
+        return
+
+    store = _capture_store()
+    if store is None:
+        # No KB; silently succeed
+        _emit_json({"finalized": [], "skipped_recent": [], "skipped_current": []})
+        return
+
+    result = capture_mod.finalize_all_except(
+        store, sid, max_age_seconds=max_age_seconds,
+    )
+    _emit_json(result)
+
+
 @capture.command("banner")
 def capture_banner_cmd() -> None:
     """Emit a SessionStart nudge if captured summaries await review."""
