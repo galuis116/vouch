@@ -116,12 +116,12 @@ All notable changes to vouch are documented here. Format follows
   KB under `eval/fixture-kb/`, and an `eval` workflow gating retrieval changes
   (#226).
 ### Fixed
-- storage now reads and writes all KB files with an explicit `encoding="utf-8"`
-  instead of relying on the process locale. on a non-utf-8 locale (e.g.
-  ISO-8859-1) a claim/page/proposal containing a normal character like an
-  em-dash would mis-decode and crash reads (`vouch pending` raised a
-  `yaml.reader.ReaderError`) or fail writes; KB files are utf-8 regardless of
-  locale now.
+- `vouch pending` (and every bulk `list_*` path) no longer crashes when a
+  single artifact file is unreadable — a corrupt or mojibake yaml is skipped
+  with a warning instead of aborting the whole listing.
+- all text-mode file i/o under `src/vouch/` now pins `encoding="utf-8"`, so a
+  non-utf-8 locale (e.g. latin-1) can no longer mangle non-ascii claim text
+  into raw control bytes that the yaml loader rejects, nor crash on write.
 - `parse_since` (the `--since` parser behind `vouch metrics`/`vouch audit`) now raises a clean `MetricsError` for a duration too large to represent (e.g. `--since 1000000000000d`), instead of letting an uncaught `OverflowError` traceback escape — restoring the documented "clean error, not a traceback" contract.
 - `sync_apply` now loads the sync source exactly once and passes the same `_SyncSource` instance into `sync_check`, closing a TOCTOU window where a bundle replaced on disk between the two `_load_source` calls could cause the validation and write phases to operate on different snapshots. Also eliminates redundant directory walks (KB sources) and triple tarball opens (bundle sources). Fixes #217.
 - `vault_to_kb` now passes `slug_hint=page_id` to `propose_page` so vault edit proposals target the existing page id from frontmatter instead of a slugified copy of the title (fixes #219).

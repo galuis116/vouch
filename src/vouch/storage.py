@@ -30,9 +30,10 @@ import re
 import sqlite3
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
+from pydantic import BaseModel, ValidationError
 
 from .models import (
     Claim,
@@ -154,6 +155,26 @@ def _yaml_load(text: str) -> Any:
     return yaml.safe_load(text)
 
 
+_log = logging.getLogger("vouch.storage")
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+def _load_or_skip(path: Path, model: type[_ModelT], kind: str) -> _ModelT | None:
+    """Parse one durable artifact file into ``model``.
+
+    On a corrupt or unreadable file — e.g. a hand-edited yaml or mojibake
+    carrying a control character that pyyaml's loader rejects — log a warning
+    and return ``None`` instead of raising, so a single bad file cannot take
+    down a whole bulk listing (``vouch pending`` and friends).
+    """
+    try:
+        return model.model_validate(_yaml_load(path.read_text(encoding="utf-8")))
+    except (yaml.YAMLError, ValidationError, UnicodeDecodeError, OSError) as e:
+        _log.warning("skipping unreadable %s %s: %s", kind, path.name, e)
+        return None
+
+
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)$", re.DOTALL)
 
 
@@ -231,7 +252,7 @@ class KBStore:
             schema_version_file.write_text(SCHEMA_VERSION + "\n", encoding="utf-8")
         gi = kb.kb_dir / ".gitignore"
         if not gi.exists():
-            # state.db is derived; proposed/ and captures/ are scratch space.
+            # state.db is derived; proposed/ is the agent's scratch space.
             gi.write_text("proposed/\ncaptures/\nstate.db\nstate.db-*\n", encoding="utf-8")
         return kb
 
@@ -329,7 +350,9 @@ class KBStore:
         for sdir in sorted(sources_dir.iterdir()):
             meta = sdir / "meta.yaml"
             if meta.exists():
-                out.append(Source.model_validate(_yaml_load(meta.read_text(encoding="utf-8"))))
+                src = _load_or_skip(meta, Source, "source")
+                if src is not None:
+                    out.append(src)
         return out
 
     # --- graph-integrity helpers ------------------------------------------
@@ -430,8 +453,9 @@ class KBStore:
         if not cdir.is_dir():
             return []
         return [
-            Claim.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
+            c
             for p in sorted(cdir.glob("*.yaml"))
+            if (c := _load_or_skip(p, Claim, "claim")) is not None
         ]
 
     def update_claim(self, claim: Claim) -> Claim:
@@ -449,8 +473,7 @@ class KBStore:
         # put_claim guard so the update path can't reintroduce the gap.
         self._validate_claim_refs(claim)
         self._claim_path(claim.id).write_text(
-            _yaml_dump(claim.model_dump(mode="json")), encoding="utf-8"
-        )
+            _yaml_dump(claim.model_dump(mode="json")), encoding="utf-8")
         self._embed_and_store(kind="claim", id=claim.id, text=claim.text)
         # Keep the FTS5 row in sync with the on-disk claim so lifecycle
         # mutations (archive, supersede, contradict, confirm) are reflected
@@ -557,8 +580,8 @@ class KBStore:
         d = self.kb_dir / "entities"
         if not d.is_dir():
             return []
-        return [Entity.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
-                for p in sorted(d.glob("*.yaml"))]
+        return [e for p in sorted(d.glob("*.yaml"))
+                if (e := _load_or_skip(p, Entity, "entity")) is not None]
 
     # --- relations ---------------------------------------------------------
 
@@ -641,8 +664,8 @@ class KBStore:
         d = self.kb_dir / "relations"
         if not d.is_dir():
             return []
-        return [Relation.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
-                for p in sorted(d.glob("*.yaml"))]
+        return [r for p in sorted(d.glob("*.yaml"))
+                if (r := _load_or_skip(p, Relation, "relation")) is not None]
 
     def relations_from(self, node_id: str) -> list[Relation]:
         return [r for r in self.list_relations() if r.source == node_id]
@@ -675,8 +698,8 @@ class KBStore:
         d = self.kb_dir / "evidence"
         if not d.is_dir():
             return []
-        return [Evidence.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
-                for p in sorted(d.glob("*.yaml"))]
+        return [ev for p in sorted(d.glob("*.yaml"))
+                if (ev := _load_or_skip(p, Evidence, "evidence")) is not None]
 
     # --- sessions ----------------------------------------------------------
 
@@ -697,8 +720,7 @@ class KBStore:
         if not self._session_path(sess.id).exists():
             raise ArtifactNotFoundError(f"session {sess.id}")
         self._session_path(sess.id).write_text(
-            _yaml_dump(sess.model_dump(mode="json")), encoding="utf-8"
-        )
+            _yaml_dump(sess.model_dump(mode="json")), encoding="utf-8")
         return sess
 
     def get_session(self, sid: str) -> Session:
@@ -711,8 +733,8 @@ class KBStore:
         d = self.kb_dir / "sessions"
         if not d.is_dir():
             return []
-        return [Session.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
-                for p in sorted(d.glob("*.yaml"))]
+        return [s for p in sorted(d.glob("*.yaml"))
+                if (s := _load_or_skip(p, Session, "session")) is not None]
 
     # --- embedding hook ------------------------------------------------------
 
@@ -803,7 +825,9 @@ class KBStore:
         out: list[Proposal] = []
         for sub in ("proposed", "decided"):
             for p in sorted((self.kb_dir / sub).glob("*.yaml")):
-                pr = Proposal.model_validate(_yaml_load(p.read_text(encoding="utf-8")))
+                pr = _load_or_skip(p, Proposal, "proposal")
+                if pr is None:
+                    continue
                 if status is None or pr.status == status:
                     out.append(pr)
         return out

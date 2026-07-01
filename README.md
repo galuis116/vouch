@@ -133,6 +133,8 @@ with your project's first real source and claim when you are ready.
 
 The full captured walkthrough lives at [docs/example-session.md](docs/example-session.md); re-render the GIF from [docs/demo.tape](docs/demo.tape) with `vhs docs/demo.tape`.
 
+Prefer reading to running? The [examples/](examples/) directory ships sample KBs as committed files, each with rendered screenshots of `vouch status`, `search`, `show`, `audit`, and `diff` against the fixture — see what the CLI returns before installing anything.
+
 ## Gittensor (SN74)
 
 vouch's first domain template targets **Gittensor** — Bittensor subnet 74, which rewards open-source contribution by rule. Its scoring model evolves across PRs, Discord, and validator changes, and the rationale usually lives in people's heads. vouch is the durable, cited memory for it:
