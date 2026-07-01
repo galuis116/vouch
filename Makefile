@@ -1,4 +1,4 @@
-.PHONY: help install dev test test-cov lint format type check build clean examples-screenshots
+.PHONY: help install dev test test-cov lint format type check build clean examples-screenshots smoke-capture
 
 PY ?= python
 PIP ?= $(PY) -m pip
@@ -16,6 +16,7 @@ help:
 	@echo "  make build         build sdist + wheel"
 	@echo "  make clean         remove caches, build artifacts, *.egg-info"
 	@echo "  make examples-screenshots  re-render docs/img/examples/*.svg"
+	@echo "  make smoke-capture end-to-end check of session auto-capture"
 
 install:
 	$(PIP) install -e '.[dev]'
@@ -41,6 +42,9 @@ check: lint type test
 
 examples-screenshots:
 	$(PY) docs/img/examples/render.py
+
+smoke-capture:
+	VOUCH="$(PY) -m vouch" bash scripts/smoke-capture.sh
 
 build:
 	$(PY) -m pip install --upgrade build
