@@ -123,6 +123,29 @@ All notable changes to vouch are documented here. Format follows
   KB under `eval/fixture-kb/`, and an `eval` workflow gating retrieval changes
   (#226).
 ### Fixed
+- the OpenClaw plugin packaging now targets the current (2026.6) plugin
+  loader, verified against a real `openclaw plugins install --link` of the
+  repo: `openclaw.plugin.json` moved to the `id` + JSON-Schema `configSchema`
+  dialect (`kind: context-engine`, `skills` as SKILL.md directories under
+  `adapters/openclaw/skills/`), a root `package.json` now carries the
+  loader-facing `openclaw.extensions` entry-module pointer and the
+  `openclaw.compat.pluginApi` floor, and the engine id was renamed
+  `vouch-context` → `vouch` so it matches the plugin id — OpenClaw's
+  installer auto-binds the contextEngine slot to the *plugin* id and
+  resolves it by *engine* id, so distinct ids silently quarantined the
+  engine in favour of the legacy engine. The old dialect's `mcpServers`,
+  `contracts`, `family`, `shared_deps`, and `openclaw.*` fields were
+  silently ignored by current loaders and are gone; the kb.* MCP server is
+  deployment config (`openclaw mcp add vouch -- vouch serve`). A Tier-2
+  e2e suite (`tests/test_openclaw_plugin_load_real.py`, skipped when the
+  `openclaw` CLI is absent) now links the repo into an isolated profile and
+  asserts import, engine registration, slot auto-bind, skill publication,
+  and a clean plugins doctor.
+- `vouch openclaw-rpc` no longer crashes serializing `assemble` responses:
+  `contextPack.generated_at` is a `datetime`, which `json.dumps` rejected on
+  any turn that found a KB — OpenClaw quarantined the engine for the process
+  and silently fell back to its legacy engine. Found by running a real
+  OpenClaw agent turn against the linked plugin.
 - `vouch pending` (and every bulk `list_*` path) no longer crashes when a
   single artifact file is unreadable — a corrupt or mojibake yaml is skipped
   with a warning instead of aborting the whole listing.
