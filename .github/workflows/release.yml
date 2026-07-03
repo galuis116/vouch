@@ -83,6 +83,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ steps.notes.outputs.title }}
         run: |
+          # idempotent: a re-run or a moved tag replaces the stale release
+          # instead of failing on "already exists".
+          gh release delete "${GITHUB_REF_NAME}" --yes --repo "$GITHUB_REPOSITORY" || true
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "$TITLE" \
             --notes-file release-notes.md
