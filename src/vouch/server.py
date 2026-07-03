@@ -310,6 +310,18 @@ def kb_read_relation(relation_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def kb_diff(old_id: str, new_id: str | None = None) -> dict[str, Any]:
+    """Field-level diff between two claim revisions or two page revisions.
+
+    new_id is optional for a superseded claim: resolves to superseded_by.
+    """
+    from dataclasses import asdict
+
+    from .diff import diff_artifacts
+    return asdict(diff_artifacts(_store(), old_id, new_id))
+
+
+@mcp.tool()
 def kb_list_pages(
     *,
     type: str | None = None,

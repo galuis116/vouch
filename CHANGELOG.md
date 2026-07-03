@@ -98,6 +98,14 @@ All notable changes to vouch are documented here. Format follows
 ## [1.1.0] — 2026-07-03
 
 ### Added
+- `kb.diff` — `vouch diff <id-old> <id-new>` (0.1.0) now has full `kb.*`
+  parity: an MCP tool and a JSONL `kb.diff` handler alongside the existing
+  CLI, registered in `capabilities.METHODS` like every other read method.
+  `<id-new>` is now optional for a claim: omitting it resolves the diff
+  against `superseded_by`, with a clear error when the claim has no
+  successor (pages still require an explicit `new_id` — they have no
+  successor pointer). Read-only throughout; still no writes, proposals, or
+  audit events (#327).
 - auto-capture: claude code sessions are harvested via hooks and filed as a
   single pending session-summary proposal for human approval. a `PostToolUse`
   hook (`vouch capture observe`) appends compact tool-use observations to an

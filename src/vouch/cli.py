@@ -2979,10 +2979,14 @@ def sync_apply_cmd(source_path: str, on_conflict: str) -> None:
 
 @cli.command()
 @click.argument("old_id")
-@click.argument("new_id")
+@click.argument("new_id", required=False)
 @click.option("--json", "as_json", is_flag=True, default=False, help="Emit the diff as JSON.")
-def diff(old_id: str, new_id: str, as_json: bool) -> None:
-    """Show what changed between two claim or two page revisions."""
+def diff(old_id: str, new_id: str | None, as_json: bool) -> None:
+    """Show what changed between two claim or two page revisions.
+
+    NEW_ID is optional for a claim that has been superseded: it resolves to
+    ``superseded_by`` automatically.
+    """
     from .diff import diff_artifacts
 
     store = _load_store()
