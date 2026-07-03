@@ -63,6 +63,10 @@ All notable changes to vouch are documented here. Format follows
   via Trusted Publishing (OIDC) exactly as before, and now also creates the
   GitHub release for the tag with the built sdist and wheel attached and the
   matching CHANGELOG section as the release body.
+- restored the `vouch-kb` distribution name in `pyproject.toml` — the same
+  #95 squash had reverted it to `vouch`, which PyPI rejects (the name belongs
+  to an unrelated project, and the trusted publisher is registered for
+  `vouch-kb`). The installed command is still `vouch`.
 - the `[1.0.0]` section below was restored: a merge after the release folded
   its entries back under `[Unreleased]`, dropping the version header.
 

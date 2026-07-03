@@ -60,6 +60,9 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
+          # checkout leaves the tag peeled to its commit; fetch the real tag
+          # object so an annotated tag's subject can become the title.
+          git fetch --force --quiet origin "refs/tags/$tag:refs/tags/$tag" || true
           awk -v ver="$version" '
             $0 ~ "^## \\[" ver "\\]" { on = 1; next }
             on && /^## \[/ { exit }
