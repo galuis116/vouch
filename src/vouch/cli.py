@@ -869,8 +869,9 @@ def list_relations() -> None:
         click.echo("no relations found")
         return
     for relation in relations:
-        rel_type = relation.relation_type or "unknown"
-        click.echo(f"{relation.id:50} {relation.from_id} -> {rel_type} -> {relation.to_id}")
+        output = f"{relation.id:50} {relation.source} -> {relation.relation} -> "
+        output += relation.target
+        click.echo(output)
 
 
 @cli.command()
