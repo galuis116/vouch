@@ -25,6 +25,7 @@ from . import __version__, bundle, health, volunteer_context
 from . import audit as audit_mod
 from . import capture as capture_mod
 from . import digest as digest_mod
+from . import fetch as fetch_mod
 from . import install_adapter as install_mod
 from . import lifecycle as life
 from . import metrics as metrics_mod
@@ -1307,6 +1308,47 @@ def source_add(path: str, title: str | None, url: str | None, source_type: str) 
         event="source.add",
         actor=_whoami(),
         object_ids=[src.id],
+    )
+    click.echo(src.id)
+
+
+@source.command("fetch")
+@click.argument("url")
+@click.option("--title", default=None)
+@click.option(
+    "--max-bytes",
+    default=fetch_mod.DEFAULT_MAX_BYTES,
+    show_default=True,
+    type=int,
+    help="Snapshot size cap.",
+)
+@click.option("--timeout", default=fetch_mod.DEFAULT_TIMEOUT, show_default=True, type=float)
+@click.option("--tag", "tags", multiple=True)
+def source_fetch(
+    url: str, title: str | None, max_bytes: int, timeout: float, tags: tuple[str, ...],
+) -> None:
+    """Fetch URL and register the exact bytes as a content-addressed Source.
+
+    Claims cite the immutable snapshot id, so the evidence a reviewer
+    approved against survives the live page drifting. http/https only;
+    hosts must resolve to public addresses; redirects are re-validated.
+    """
+    store = _load_store()
+    with _cli_errors():
+        src = fetch_mod.snapshot_url(
+            store,
+            url,
+            title=title,
+            tags=list(tags) or None,
+            max_bytes=max_bytes,
+            timeout=timeout,
+        )
+    audit_mod.log_event(
+        store.kb_dir,
+        event="source.fetch",
+        actor=_whoami(),
+        object_ids=[src.id],
+        data={"url": url},
     )
     click.echo(src.id)
 
