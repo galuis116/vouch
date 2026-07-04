@@ -26,6 +26,7 @@ from . import audit as audit_mod
 from . import capture as capture_mod
 from . import digest as digest_mod
 from . import fetch as fetch_mod
+from . import inbox as inbox_mod
 from . import install_adapter as install_mod
 from . import lifecycle as life
 from . import metrics as metrics_mod
@@ -1369,6 +1370,44 @@ def source_verify(fail_on_issue: bool) -> None:
         )
     if fail_on_issue and bad:
         sys.exit(1)
+
+
+@cli.command(name="inbox")
+@click.option(
+    "--dir", "directory", required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Folder to scan (must live under the project root).",
+)
+@click.option("--watch", "watch_mode", is_flag=True, help="Poll instead of a single pass.")
+@click.option(
+    "--poll-interval",
+    default=inbox_mod.DEFAULT_POLL_INTERVAL,
+    show_default=True,
+    type=float,
+)
+@click.option("--once", is_flag=True, help="Single tick even under --watch (test/ci bound).")
+def inbox_cmd(directory: str, watch_mode: bool, poll_interval: float, once: bool) -> None:
+    """Scan an inbox folder: each new file becomes a registered source plus
+    one pending page proposal. Proposes only — a human still approves."""
+    store = _load_store()
+    path = Path(directory)
+    with _cli_errors():
+        if watch_mode and not once:
+            def _report(res: inbox_mod.ScanResult) -> None:
+                if res.proposed:
+                    click.echo(f"filed {len(res.proposed)} proposal(s): {', '.join(res.proposed)}")
+
+            try:
+                inbox_mod.watch(
+                    store, path, poll_interval=poll_interval, on_result=_report,
+                )
+            except KeyboardInterrupt:
+                pass
+            return
+        res = inbox_mod.scan(store, path)
+    click.echo(f"filed {len(res.proposed)} proposal(s); skipped {len(res.skipped)} file(s)")
+    for pid in res.proposed:
+        click.echo(f"  {pid}")
 
 
 # --- lifecycle ------------------------------------------------------------
