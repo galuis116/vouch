@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1401,12 +1401,10 @@ def inbox_cmd(directory: str, watch_mode: bool, poll_interval: float, once: bool
                 if res.proposed:
                     click.echo(f"filed {len(res.proposed)} proposal(s): {', '.join(res.proposed)}")
 
-            try:
+            with suppress(KeyboardInterrupt):
                 inbox_mod.watch(
                     store, path, poll_interval=poll_interval, on_result=_report,
                 )
-            except KeyboardInterrupt:
-                pass
             return
         res = inbox_mod.scan(store, path)
     click.echo(f"filed {len(res.proposed)} proposal(s); skipped {len(res.skipped)} file(s)")

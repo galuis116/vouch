@@ -26,6 +26,25 @@ All notable changes to vouch are documented here. Format follows
   the plugin skills list): `/vouch-ask`, `/vouch-remember`, `/vouch-record`,
   `/vouch-followup`, `/vouch-standup`. every flow terminates at
   `kb_propose_*` — none may call `kb_approve`.
+- `vouch source fetch <url>`: snapshot a url's exact bytes as a
+  content-addressed source so claims cite immutable evidence. conservative
+  intake: http/https only, redirects re-validated, private-network hosts
+  refused, 2 mib cap, `fetched_at` recorded in source metadata.
+- `vouch inbox --dir <path> [--watch]`: dropped `.md`/`.txt` files become a
+  registered source plus one pending page proposal each — mechanical, no
+  model in the loop, never approves. content-hash seen-state makes re-runs
+  idempotent; bounded stdlib poll, no daemon.
+- `vouch notify sweep|test`: config-declared reviewer webhooks
+  (`proposal.created`, `queue.backlogged`, `proposal.aged`) with optional
+  hmac-signed envelopes and `env:` secret refs. read-and-notify only;
+  best-effort delivery; idempotent per (event, proposal).
+- protected page kinds: `page_kinds.<kind>.protected: true` exempts a kind
+  from the `trusted-agent` self-approval opt-out — its pages always need a
+  reviewer other than the proposer. the template marks `voice` and
+  `decision-record` protected.
+- string-typed frontmatter schema fields now accept yaml's native
+  date/datetime scalars, fixing approve-time re-validation of pages whose
+  frontmatter round-tripped through disk (e.g. `due_at: 2026-07-01`).
 
 ## [1.1.0] — 2026-07-03
 

@@ -15,7 +15,7 @@ from vouch.storage import KBStore
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+    def do_GET(self) -> None:
         if self.path == "/page":
             body = b"# hello from the fixture\n"
             self.send_response(200)

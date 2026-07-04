@@ -9,6 +9,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -20,9 +21,9 @@ NOW = datetime(2026, 7, 4, 12, 0, 0, tzinfo=UTC)
 
 
 class _Sink(BaseHTTPRequestHandler):
-    received: list[tuple[dict, dict]] = []
+    received: ClassVar[list[tuple[dict, dict]]] = []
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length))
         _Sink.received.append((body, dict(self.headers)))

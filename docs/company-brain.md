@@ -46,7 +46,9 @@ go through the gate and land in the audit log like any other write.
 
 **Decisions and voice must cite.** The `decision-record` and `voice` kinds
 set `required_citations: true`, so the gate rejects an uncited one at both
-propose and approve time.
+propose and approve time. They are also `protected: true`: even under
+`review.approver_role: trusted-agent`, a protected page always needs a
+reviewer other than its proposer.
 
 ## Querying records
 
@@ -61,6 +63,43 @@ vouch pages --kind contact --meta org=acme-example --json
 
 Deliberately not a query language: equality and bounds on declared fields,
 nothing more. The yaml files stay the only source of truth.
+
+## Feeding the brain
+
+Evidence comes in two ungated intake channels (sources are evidence, not
+knowledge — only claims and pages go through review):
+
+```sh
+vouch source fetch https://example.com/spec       # snapshot a URL, cite its sha256 id
+vouch inbox --dir inbox/                          # dropped files -> pending page proposals
+```
+
+`source fetch` stores the exact bytes once, content-addressed, so claims
+cite an immutable snapshot the live page can't drift away from. It fetches
+conservatively: http/https only, redirects re-validated, private-network
+hosts refused, 2 MiB cap. The inbox is the hands-free path: drop meeting
+notes or a memo into a folder, each new file becomes a registered source
+plus one pending page proposal citing it. Both channels only propose;
+neither can approve.
+
+## Staying responsive
+
+Configure outbound webhooks so the reviewer learns the queue grew without
+polling:
+
+```yaml
+notify:
+  webhooks:
+    - url: env:VOUCH_NOTIFY_URL
+      events: [proposal.created, queue.backlogged, proposal.aged]
+      backlog_threshold: 25
+      age_threshold: 48h
+      secret: env:VOUCH_NOTIFY_SECRET   # optional hmac-sha256 signing
+```
+
+`vouch notify sweep` (cron it next to the digest) fires the configured
+events idempotently; `vouch notify test --url <u>` verifies an endpoint.
+Delivery is best-effort — a dead endpoint never wedges anything.
 
 ## The daily loop
 
