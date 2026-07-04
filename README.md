@@ -11,6 +11,7 @@
   <a href="https://pypi.org/project/vouch-kb/"><img src="https://img.shields.io/pypi/v/vouch-kb.svg" alt="PyPI"></a>
   <a href="https://pypi.org/project/vouch-kb/"><img src="https://img.shields.io/pypi/pyversions/vouch-kb.svg" alt="Python versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/vouchdev/vouch.svg" alt="MIT licensed"></a>
+  <a href="https://x.com/vouch_dev"><img src="https://img.shields.io/badge/follow-%40vouch__dev-000000?logo=x&logoColor=white" alt="Follow @vouch_dev on X"></a>
 </p>
 
 > Agents should not start every session with amnesia — but they shouldn't get to write whatever they want either.
@@ -250,7 +251,15 @@ vouch migrate [--check] [--dry-run]         # upgrade .vouch/ format safely
 
 vouch pending                               # list pending proposals
 vouch review [--limit N] [--type KIND]      # guided proposal review queue
-vouch show <proposal-id>
+vouch show <proposal-id>                    # show pending proposal details
+vouch read-claim <claim-id>                 # read an approved claim
+vouch read-page <page-id>                   # read an approved page
+vouch read-entity <entity-id>               # read an approved entity
+vouch read-relation <relation-id>           # read an approved relation
+vouch list-claims                           # list all approved claims
+vouch list-pages                            # list all approved pages
+vouch list-entities                         # list all approved entities
+vouch list-relations                        # list all approved relations
 vouch approve <proposal-id> [--reason ...]
 vouch reject <proposal-id> --reason "..."
 vouch expire [--apply] [--days N] [--json]   # GC stale pending proposals
@@ -335,28 +344,29 @@ Its `.claude/settings.json` (tier T4) registers a `PostToolUse` hook (`vouch cap
 
 ## Running vouch as an OpenClaw plugin
 
-Vouch ships an [OpenClaw](https://github.com/dripsmvcp/openclaw) plugin manifest at the
-repo root — [`openclaw.plugin.json`](openclaw.plugin.json). Drop the vouch repo
-into an OpenClaw deployment and the plugin loader picks it up automatically:
-the MCP server, the four slash commands (`/vouch-recall`, `/vouch-status`,
-`/vouch-resolve-issue`, `/vouch-propose-from-pr`), and the CLAUDE.md fenced
-snippet become available as one bundle.
+Vouch ships an [OpenClaw](https://github.com/dripsmvcp/openclaw) plugin at the
+repo root — [`openclaw.plugin.json`](openclaw.plugin.json) plus a small
+[`package.json`](package.json) that points the loader at the JS entry module.
+Install the repo as a linked plugin and OpenClaw picks up two things
+automatically:
 
-The manifest declares vouch's trust boundary explicitly — remote callers'
-filesystem access is confined, every write tool routes through the review
-gate, every lifecycle op is audit-logged. The `configSchema` exposes only
-`kb_path`, `agent`, and `transport` — no API keys, no secrets; vouch is
-local-first.
+* the **vouch context engine** — registered as `vouch` and auto-bound to
+  `plugins.slots.contextEngine` on install, it injects cited KB context
+  (retrieval + salience reflex + hot memory) into every agent turn, and
+* the **four skills / slash commands** (`/vouch-recall`, `/vouch-status`,
+  `/vouch-resolve-issue`, `/vouch-propose-from-pr`).
 
 ```bash
-# Inside an OpenClaw deployment that vendors plugin repos:
-openclaw plugin add vouchdev/vouch
-openclaw plugin enable vouch
+openclaw plugins install --link /path/to/vouch
+# the kb.* MCP tool surface is deployment config, same shape as every host:
+openclaw mcp add vouch -- vouch serve
 ```
 
-The plugin's `mcpServers.vouch` block matches the same `.mcp.json` shape
-Claude Code uses — both platforms drive the same `vouch serve` process,
-so the kb.* surface is identical regardless of host.
+The `configSchema` exposes only `kb_path` and `agent` — no API keys, no
+secrets; vouch is local-first. The trust boundary (confined filesystem for
+remote callers, review-gated writes, audit-logged lifecycle ops) ships as
+project-local policy via `vouch install-mcp openclaw` — see
+[`adapters/openclaw/`](adapters/openclaw/).
 
 ## JSONL request/response shape
 

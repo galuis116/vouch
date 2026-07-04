@@ -36,9 +36,17 @@ def test_brain_command_pins_the_never_approve_rule(name: str) -> None:
 
 
 def test_manifest_skills_all_exist() -> None:
+    # the 2026.6 dialect lists skill *directories*; each brain command must be
+    # published as a child dir with a SKILL.md
     manifest = json.loads((REPO_ROOT / "openclaw.plugin.json").read_text(encoding="utf-8"))
-    for rel in manifest["skills"]:
-        assert (REPO_ROOT / rel).is_file(), f"manifest skills entry missing: {rel}"
+    roots = [REPO_ROOT / rel for rel in manifest["skills"]]
+    for root in roots:
+        assert root.is_dir(), f"manifest skills entry missing: {root}"
+    for name in BRAIN_COMMANDS:
+        stem = name.removesuffix(".md")
+        assert any(
+            (root / stem / "SKILL.md").is_file() for root in roots
+        ), f"brain command {stem} not published as an openclaw skill"
 
 
 @pytest.mark.parametrize("module", ["fetch", "inbox", "notify"])
