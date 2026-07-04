@@ -17,6 +17,7 @@ keep working exactly as before.
 
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Any
 
 import yaml
@@ -29,9 +30,13 @@ CONFIG_FILENAME = "config.yaml"
 
 # JSON-Schema `type` keyword -> python types it accepts. `bool` is excluded
 # from the numeric types on purpose: in python `True` is an int, but a schema
-# author asking for an integer never means a boolean.
+# author asking for an integer never means a boolean. `string` accepts yaml's
+# native date/datetime scalars: a bare `due_at: 2026-07-01` loads as a date
+# object from CLI --meta parsing and from every frontmatter disk round-trip,
+# so rejecting it would make string schemas unusable for date fields (and
+# fail re-validation at approve time for pages that validated at propose).
 _JSON_TYPES: dict[str, tuple[type, ...]] = {
-    "string": (str,),
+    "string": (str, _dt.date, _dt.datetime),
     "number": (int, float),
     "integer": (int,),
     "boolean": (bool,),

@@ -57,6 +57,46 @@ def test_undeclared_kind_is_rejected(store: KBStore) -> None:
     assert "unknown page kind" in str(exc.value)
 
 
+def test_string_schema_accepts_yaml_date_scalars(store: KBStore) -> None:
+    """A bare `due_at: 2026-07-01` loads as datetime.date from CLI --meta
+    parsing and from every frontmatter disk round-trip; a `type: string`
+    schema must accept it or pages fail re-validation at approve time."""
+    import datetime
+
+    _declare_kinds(
+        store,
+        {
+            "followup": {
+                "required_fields": ["due_at"],
+                "frontmatter_schema": {
+                    "type": "object",
+                    "properties": {"due_at": {"type": "string"}},
+                },
+            }
+        },
+    )
+    pr = propose_page(
+        store,
+        title="ping alice-example",
+        body="",
+        page_type="followup",
+        metadata={"due_at": datetime.date(2026, 7, 1)},
+        proposed_by="agent",
+    )
+    page = approve(store, pr.id, approved_by="reviewer")
+    assert isinstance(page, Page)
+    # a genuinely wrong type still fails
+    with pytest.raises(ProposalError):
+        propose_page(
+            store,
+            title="bad",
+            body="",
+            page_type="followup",
+            metadata={"due_at": ["not", "a", "date"]},
+            proposed_by="agent",
+        )
+
+
 # --- acceptance: per-field error on a missing required field ---------------
 
 
