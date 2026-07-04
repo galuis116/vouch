@@ -97,6 +97,32 @@ def test_string_schema_accepts_yaml_date_scalars(store: KBStore) -> None:
         )
 
 
+def test_protected_kind_blocks_self_approval_despite_trusted_agent(store: KBStore) -> None:
+    cfg = yaml.safe_load(store.config_path.read_text())
+    cfg["review"] = {"approver_role": "trusted-agent"}
+    cfg["page_kinds"] = {
+        "voice": {"protected": True},
+        "meeting-notes": {},
+    }
+    store.config_path.write_text(yaml.safe_dump(cfg))
+
+    # unprotected kind: trusted-agent opt-out lets the proposer self-approve
+    open_pr = propose_page(
+        store, title="sync", body="b", page_type="meeting-notes", proposed_by="agent",
+    )
+    assert isinstance(approve(store, open_pr.id, approved_by="agent"), Page)
+
+    # protected kind: self-approval stays forbidden regardless of the opt-out
+    voice_pr = propose_page(
+        store, title="email voice", body="b", page_type="voice", proposed_by="agent",
+    )
+    with pytest.raises(ProposalError, match="protected"):
+        approve(store, voice_pr.id, approved_by="agent")
+
+    # a distinct reviewer can still approve it
+    assert isinstance(approve(store, voice_pr.id, approved_by="reviewer"), Page)
+
+
 # --- acceptance: per-field error on a missing required field ---------------
 
 

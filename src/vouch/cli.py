@@ -31,6 +31,7 @@ from . import install_adapter as install_mod
 from . import lifecycle as life
 from . import metrics as metrics_mod
 from . import migrations as migrations_mod
+from . import notify as notify_mod
 from . import pr_cache as prc_mod
 from . import provenance as prov_mod
 from . import recall as recall_mod
@@ -1185,6 +1186,7 @@ def schema_list_cmd(as_json: bool) -> None:
                 "required_fields": required,
                 "required_citations": citations,
                 "has_frontmatter_schema": bool(fm_schema),
+                "protected": registry.is_protected(name),
             }
         )
         extras: list[str] = []
@@ -1194,6 +1196,8 @@ def schema_list_cmd(as_json: bool) -> None:
             extras.append("citations-required")
         if fm_schema:
             extras.append("schema")
+        if registry.is_protected(name):
+            extras.append("protected")
         suffix = f"  ({'; '.join(extras)})" if extras else ""
         lines.append(f"{name}{suffix}")
     if as_json:
@@ -1408,6 +1412,41 @@ def inbox_cmd(directory: str, watch_mode: bool, poll_interval: float, once: bool
     click.echo(f"filed {len(res.proposed)} proposal(s); skipped {len(res.skipped)} file(s)")
     for pid in res.proposed:
         click.echo(f"  {pid}")
+
+
+@cli.group()
+def notify() -> None:
+    """Outbound reviewer notification webhooks (config: notify.webhooks)."""
+
+
+@notify.command("sweep")
+def notify_sweep() -> None:
+    """Evaluate pending-queue triggers and fire configured webhooks.
+
+    Idempotent per (event, proposal) — safe to run from cron. Read-and-
+    notify only: nothing here can propose, approve, or edit."""
+    store = _load_store()
+    with _cli_errors():
+        fired = notify_mod.sweep(store)
+    if fired:
+        click.echo(f"fired {len(fired)} event(s): {', '.join(fired)}")
+    else:
+        click.echo("nothing to fire")
+
+
+@notify.command("test")
+@click.option("--url", required=True)
+@click.option("--secret", default=None, help="Optional hmac secret (or env:VAR).")
+def notify_test(url: str, secret: str | None) -> None:
+    """Send a synthetic event to URL and report delivery."""
+    resolved = None
+    if secret:
+        with _cli_errors():
+            resolved = notify_mod._resolve_env(secret, what="--secret")
+    ok = notify_mod.send_test(url, secret=resolved)
+    click.echo("delivered" if ok else "delivery failed")
+    if not ok:
+        sys.exit(1)
 
 
 # --- lifecycle ------------------------------------------------------------

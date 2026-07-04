@@ -339,10 +339,12 @@ BRAIN_PAGE_KINDS: dict[str, dict[str, object]] = {
     "decision-record": {
         "description": "why the team decided something; must cite evidence",
         "required_citations": True,
+        "protected": True,
     },
     "voice": {
         "description": "how the team sounds in one channel; cites the examples it distills",
         "required_citations": True,
+        "protected": True,
     },
 }
 

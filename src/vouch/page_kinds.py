@@ -72,6 +72,11 @@ class PageKindSpec(BaseModel):
         description="JSON-Schema subset: {type: object, properties: {...}, required: [...]}",
     )
     required_citations: bool = False
+    # A protected kind is exempt from the `review.approver_role:
+    # trusted-agent` self-approval opt-out: its pages always need a reviewer
+    # other than the proposer. Not inherited through `extends` — protection
+    # is a property of the concrete kind, declared where a reviewer reads it.
+    protected: bool = False
     description: str | None = None
 
     @field_validator("frontmatter_schema", mode="before")
@@ -105,6 +110,10 @@ class PageKindRegistry:
 
     def is_known(self, name: str) -> bool:
         return name in self._specs
+
+    def is_protected(self, name: str) -> bool:
+        spec = self._specs.get(name)
+        return bool(spec and spec.protected)
 
     def resolve(self, name: str) -> tuple[list[str], dict[str, Any], bool]:
         """Return (required_fields, frontmatter_schema, required_citations).
