@@ -1630,9 +1630,12 @@ def capture_finalize_cmd(session_id: str | None) -> None:
     if store is None:
         return
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
+    transcript_raw = payload.get("transcript_path")
+    transcript = Path(str(transcript_raw)) if transcript_raw else None
     result = capture_mod.finalize(
         store, sid, cwd=cwd, project=cwd.name,
         generated_at=datetime.now(UTC).isoformat(),
+        transcript_path=transcript,
     )
     _emit_json(result)
 
