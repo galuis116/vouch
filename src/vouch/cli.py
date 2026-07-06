@@ -8,6 +8,7 @@ same storage + audit + index layer.
 from __future__ import annotations
 
 import getpass
+import io
 import json
 import os
 import sys
@@ -145,6 +146,28 @@ def _echo(message: str = "", *, err: bool = False) -> None:
     # pass an explicit color flag so FORCE_COLOR into a pipe keeps the styling
     # and NO_COLOR / plain pipes stay clean.
     click.echo(message, err=err, color=_color_enabled())
+
+
+def _force_utf8_stdio() -> None:
+    # On non-UTF-8 locales (e.g. LANG=en_US.ISO-8859-1) Python encodes stdio
+    # with the locale codec, so the '•' / '…' in CLI output — and any
+    # non-ASCII KB content flowing through the stdio servers — raises
+    # UnicodeEncodeError. Artifacts are UTF-8 on disk; speak UTF-8 on the
+    # wire too, replacing rather than crashing for terminals that can't.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if (
+            isinstance(stream, io.TextIOWrapper)
+            and (stream.encoding or "").lower().replace("-", "") != "utf8"
+        ):
+            with suppress(ValueError, OSError):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+# At import, not in the cli() callback: click renders eager --help /
+# --version output during argument parsing, before any group callback
+# runs — and the group docstring's em dash already crashes a latin-1
+# stdout. Idempotent and a no-op on utf-8 streams.
+_force_utf8_stdio()
 
 
 @click.group()

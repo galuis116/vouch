@@ -11,6 +11,9 @@ which slipped past the except and surfaced as a traceback.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -602,3 +605,45 @@ def test_new_pending_not_approved(store: KBStore) -> None:
     assert len(store.list_pages()) == 0
     pending = store.list_proposals(ProposalStatus.PENDING)
     assert len(pending) == 1
+
+
+# --- non-utf-8 stdio --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("args", "needle"),
+    [
+        # '•' separators in the status summary
+        (["status"], "durable"),
+        # eager help renders the em-dash group docstring BEFORE the group
+        # callback runs, so a callback-scoped reconfigure can't save it —
+        # this is why _force_utf8_stdio() runs at module import.
+        (["--help"], "review-gated"),
+    ],
+)
+def test_cli_survives_non_utf8_stdio(tmp_path: Path, args: list[str], needle: str) -> None:
+    """1.1.0 regression: under a non-utf-8 locale (LANG=en_US.ISO-8859-1)
+    click encoded stdout with the locale codec, so any non-ascii glyph in
+    CLI output raised UnicodeEncodeError. The CLI forces utf-8 stdio at
+    import (replacing where the stream can't), so these must exit 0.
+    """
+    KBStore.init(tmp_path)
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")
+    }
+    # PYTHONIOENCODING pins the stream codec no matter which locales the
+    # host has generated — same failure mode as LANG=en_US.ISO-8859-1.
+    env["PYTHONIOENCODING"] = "latin-1"
+    proc = subprocess.run(
+        [sys.executable, "-m", "vouch", *args],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "UnicodeEncodeError" not in proc.stderr, proc.stderr
+    assert needle in proc.stdout, proc.stdout
