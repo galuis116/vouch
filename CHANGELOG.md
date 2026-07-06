@@ -17,6 +17,44 @@ All notable changes to vouch are documented here. Format follows
 - review-ui: a **compile wiki** button on the queue (shown once
   `compile.llm_cmd` is configured) runs the same ingest pass and lands the
   drafts in the queue; success and per-draft drop counts surface as a notice.
+- company-brain template: `vouch init --template company-brain` declares
+  typed record kinds (contact, org, project-record, meeting-notes, followup,
+  decision-record, voice) as `page_kinds` config and seeds a cited guide
+  page. operator-declared kinds always win; the merge is additive and
+  idempotent. see `docs/company-brain.md`.
+- `vouch init --template <name>` dispatches the onboarding template registry
+  (starter stays the default; templates layer on top of it).
+- frontmatter filters on `kb.list_pages` across mcp/jsonl/cli: kind equality,
+  field equality, and inclusive ordered bounds (numbers, iso dates), plus the
+  `vouch pages` human mirror. a viewport over `store.list_pages()`, not a
+  query language.
+- `kb.digest` / `vouch digest`: read-only reviewer briefing — pending
+  proposals oldest-first, recent decisions, stale claims, followups due, and
+  citation coverage. `--format text|json|markdown`; writes nothing, so it is
+  safe to run from cron.
+- five company-brain slash commands in the claude-code adapter (mirrored to
+  the plugin skills list): `/vouch-ask`, `/vouch-remember`, `/vouch-record`,
+  `/vouch-followup`, `/vouch-standup`. every flow terminates at
+  `kb_propose_*` — none may call `kb_approve`.
+- `vouch source fetch <url>`: snapshot a url's exact bytes as a
+  content-addressed source so claims cite immutable evidence. conservative
+  intake: http/https only, redirects re-validated, private-network hosts
+  refused, 2 mib cap, `fetched_at` recorded in source metadata.
+- `vouch inbox --dir <path> [--watch]`: dropped `.md`/`.txt` files become a
+  registered source plus one pending page proposal each — mechanical, no
+  model in the loop, never approves. content-hash seen-state makes re-runs
+  idempotent; bounded stdlib poll, no daemon.
+- `vouch notify sweep|test`: config-declared reviewer webhooks
+  (`proposal.created`, `queue.backlogged`, `proposal.aged`) with optional
+  hmac-signed envelopes and `env:` secret refs. read-and-notify only;
+  best-effort delivery; idempotent per (event, proposal).
+- protected page kinds: `page_kinds.<kind>.protected: true` exempts a kind
+  from the `trusted-agent` self-approval opt-out — its pages always need a
+  reviewer other than the proposer. the template marks `voice` and
+  `decision-record` protected.
+- string-typed frontmatter schema fields now accept yaml's native
+  date/datetime scalars, fixing approve-time re-validation of pages whose
+  frontmatter round-tripped through disk (e.g. `due_at: 2026-07-01`).
 
 ## [1.1.0] — 2026-07-03
 
@@ -41,6 +79,11 @@ All notable changes to vouch are documented here. Format follows
   strategy) instead of skipping it, so the capture / recall hooks land on
   projects that already have a settings file. idempotent; user entries are
   preserved.
+- `vouch new <kind>` — scaffold a typed page or entity proposal from the
+  page-kind registry: stubs required frontmatter fields, supports
+  `--field key=value`, `--interactive`, `--dry-run`, and `--json`; entity
+  kinds (`person`, `project`, …) route to `propose_entity`, with page kinds
+  taking precedence on name collisions unless `--entity` is set (#330).
 - GitHub PR auto-labeling: a pull-request metadata-only labeler workflow now
   applies vouch surface labels from `.github/labeler.yml`, keeps those labels
   in sync as files change, and adds OpenClaw-style `size: XS` through
