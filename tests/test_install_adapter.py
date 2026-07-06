@@ -435,6 +435,94 @@ def test_fenced_refresh_leaves_unclosed_fence_alone(tmp_path: Path) -> None:
     assert "AGENTS.md" in result.skipped
 
 
+# --- codex: T3 skills mirroring the vouch slash commands
+# (vouchdev/vouch#386) ------------------------------------------------------
+#
+# Scope decision from the ticket: codex custom prompts live only under
+# ~/.codex/prompts/ (user-global) and are deprecated upstream in favour of
+# skills, which DO have a project-local home at <project>/.codex/skills/.
+# Shipping skills keeps the #179 rule intact — a project-scoped install
+# never touches home-directory state.
+
+_CODEX_SKILL_NAMES = (
+    "vouch-ask",
+    "vouch-followup",
+    "vouch-propose-from-pr",
+    "vouch-recall",
+    "vouch-record",
+    "vouch-remember",
+    "vouch-resolve-issue",
+    "vouch-standup",
+    "vouch-status",
+)
+
+
+def _body_after_frontmatter(text: str) -> str:
+    parts = text.split("---", 2)
+    assert len(parts) == 3, "expected yaml frontmatter"
+    return parts[2].strip()
+
+
+def test_install_codex_t3_ships_all_nine_skills(tmp_path: Path) -> None:
+    result = install("codex", target=tmp_path, tier="T3")
+    for name in _CODEX_SKILL_NAMES:
+        skill = tmp_path / ".codex" / "skills" / name / "SKILL.md"
+        assert skill.is_file(), f"missing {name}"
+        assert f".codex/skills/{name}/SKILL.md" in result.written
+
+
+def test_codex_t3_writes_nothing_outside_the_project(tmp_path: Path) -> None:
+    """#179 invariant: every installed path stays under the target — a
+    project-scoped install must never reach ~/.codex."""
+    result = install("codex", target=tmp_path, tier="T3")
+    for rel in (*result.written, *result.appended, *result.merged):
+        resolved = (tmp_path / rel).resolve()
+        assert resolved.is_relative_to(tmp_path.resolve()), rel
+
+
+@pytest.mark.parametrize("name", _CODEX_SKILL_NAMES)
+def test_codex_skills_stay_in_sync_with_claude_commands(
+    name: str, tmp_path: Path
+) -> None:
+    """The skill bodies are the claude-code command bodies — referenced in
+    place from the openclaw mirror rather than forked, so one edit updates
+    every host and this test catches any drift."""
+    install("codex", target=tmp_path, tier="T3")
+    skill = tmp_path / ".codex" / "skills" / name / "SKILL.md"
+    command = (
+        REPO_ROOT / "adapters" / "claude-code" / ".claude" / "commands" / f"{name}.md"
+    )
+    assert _body_after_frontmatter(skill.read_text(encoding="utf-8")) == (
+        _body_after_frontmatter(command.read_text(encoding="utf-8"))
+    ), f"{name}: codex SKILL.md body drifted from the claude-code command"
+
+
+def test_codex_skill_frontmatter_names_match_dirs(tmp_path: Path) -> None:
+    """Codex resolves a skill by its frontmatter name; a mismatch with the
+    directory name would ship a skill that answers to the wrong id."""
+    install("codex", target=tmp_path, tier="T3")
+    for name in _CODEX_SKILL_NAMES:
+        text = (tmp_path / ".codex" / "skills" / name / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        frontmatter = text.split("---", 2)[1]
+        # Match the whole `name:` line, not a substring: `name: vouch-recall`
+        # must not be satisfied by `name: vouch-recall-typo`.
+        name_lines = [
+            ln.strip() for ln in frontmatter.splitlines()
+            if ln.strip().startswith("name:")
+        ]
+        assert f"name: {name}" in name_lines, (name, name_lines)
+
+
+def test_install_codex_t3_is_idempotent(tmp_path: Path) -> None:
+    install("codex", target=tmp_path, tier="T3")
+    second = install("codex", target=tmp_path, tier="T3")
+    assert second.written == []
+    for name in _CODEX_SKILL_NAMES:
+        assert f".codex/skills/{name}/SKILL.md" in second.skipped
+
+
 # --- codex: config.toml deep-merge (vouchdev/vouch#384) ---------------------
 
 
