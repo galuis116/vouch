@@ -27,6 +27,7 @@ METHODS = [
     "kb.read_claim",
     "kb.read_entity",
     "kb.read_relation",
+    "kb.diff",
     "kb.list_pages",
     "kb.list_claims",
     "kb.list_entities",

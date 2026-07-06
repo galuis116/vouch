@@ -251,6 +251,14 @@ def _h_read_relation(p: dict) -> dict:
     return _store().get_relation(p["relation_id"]).model_dump(mode="json")
 
 
+def _h_diff(p: dict) -> dict:
+    from dataclasses import asdict
+
+    from .diff import diff_artifacts
+
+    return asdict(diff_artifacts(_store(), p["old_id"], p.get("new_id")))
+
+
 def _h_list_pages(p: dict) -> list[dict]:
     pages = filter_pages(
         _store().list_pages(),
@@ -725,6 +733,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.read_claim": _h_read_claim,
     "kb.read_entity": _h_read_entity,
     "kb.read_relation": _h_read_relation,
+    "kb.diff": _h_diff,
     "kb.list_pages": _h_list_pages,
     "kb.list_claims": _h_list_claims,
     "kb.list_entities": _h_list_entities,
