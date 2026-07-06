@@ -90,9 +90,14 @@ def test_install_claude_code_t4_writes_all_tiers(tmp_path: Path) -> None:
     assert (cmd_dir / "vouch-status.md").is_file()
     assert (cmd_dir / "vouch-resolve-issue.md").is_file()
     assert (cmd_dir / "vouch-propose-from-pr.md").is_file()
+    assert (cmd_dir / "vouch-ask.md").is_file()
+    assert (cmd_dir / "vouch-remember.md").is_file()
+    assert (cmd_dir / "vouch-record.md").is_file()
+    assert (cmd_dir / "vouch-followup.md").is_file()
+    assert (cmd_dir / "vouch-standup.md").is_file()
     assert (tmp_path / ".claude" / "settings.json").is_file()
-    # T1 .mcp.json + T2 CLAUDE.md + 4 T3 commands + T4 settings = 7 files.
-    assert len(result.written) == 7, result.written
+    # T1 .mcp.json + T2 CLAUDE.md + 9 T3 commands + T4 settings = 12 files.
+    assert len(result.written) == 12, result.written
 
 
 def test_install_claude_code_is_idempotent(tmp_path: Path) -> None:
@@ -109,6 +114,11 @@ def test_install_claude_code_is_idempotent(tmp_path: Path) -> None:
         ".claude/commands/vouch-status.md",
         ".claude/commands/vouch-resolve-issue.md",
         ".claude/commands/vouch-propose-from-pr.md",
+        ".claude/commands/vouch-ask.md",
+        ".claude/commands/vouch-remember.md",
+        ".claude/commands/vouch-record.md",
+        ".claude/commands/vouch-followup.md",
+        ".claude/commands/vouch-standup.md",
         ".claude/settings.json",
     }
 
