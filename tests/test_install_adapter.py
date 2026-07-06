@@ -319,6 +319,189 @@ def test_install_openclaw_is_idempotent(tmp_path: Path) -> None:
     }
 
 
+# --- codex: config.toml deep-merge (vouchdev/vouch#384) ---------------------
+
+
+def test_codex_toml_merges_into_existing_config(tmp_path: Path) -> None:
+    """User already has .codex/config.toml — codex's *primary* config file.
+    The old plain-copy path silently skipped it, so vouch never got wired on
+    any project where codex was already configured. toml_merge adds
+    [mcp_servers.vouch] while preserving every unrelated table and value."""
+    import tomllib
+
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text(
+        'model = "gpt-5"\napproval_policy = "never"\n\n'
+        '[mcp_servers.other]\ncommand = "other-server"\nargs = ["--fast"]\n',
+        encoding="utf-8",
+    )
+    result = install("codex", target=tmp_path, tier="T1")
+    data = tomllib.loads((codex_dir / "config.toml").read_text(encoding="utf-8"))
+
+    # user content preserved
+    assert data["model"] == "gpt-5"
+    assert data["approval_policy"] == "never"
+    assert data["mcp_servers"]["other"]["command"] == "other-server"
+    assert data["mcp_servers"]["other"]["args"] == ["--fast"]
+
+    # vouch content merged in
+    assert data["mcp_servers"]["vouch"]["command"] == "vouch"
+    assert data["mcp_servers"]["vouch"]["args"] == ["serve"]
+    assert data["mcp_servers"]["vouch"]["env"]["VOUCH_AGENT"] == "codex"
+
+    assert ".codex/config.toml" in result.merged
+    assert ".codex/config.toml" not in result.skipped
+    assert ".codex/config.toml" not in result.written
+
+
+def test_codex_toml_merge_is_idempotent(tmp_path: Path) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text('model = "gpt-5"\n', encoding="utf-8")
+    install("codex", target=tmp_path, tier="T1")
+    first = (codex_dir / "config.toml").read_text(encoding="utf-8")
+    second = install("codex", target=tmp_path, tier="T1")
+    after = (codex_dir / "config.toml").read_text(encoding="utf-8")
+
+    assert first == after  # no change on re-run
+    assert ".codex/config.toml" in second.skipped
+    assert ".codex/config.toml" not in second.merged
+
+
+def test_codex_toml_fresh_install_writes_template(tmp_path: Path) -> None:
+    import tomllib
+
+    result = install("codex", target=tmp_path, tier="T1")
+    cfg = tmp_path / ".codex" / "config.toml"
+    assert cfg.is_file()
+    data = tomllib.loads(cfg.read_text(encoding="utf-8"))
+    assert data["mcp_servers"]["vouch"]["command"] == "vouch"
+    assert ".codex/config.toml" in result.written
+    assert ".codex/config.toml" not in result.merged
+
+
+def test_codex_toml_existing_vouch_entry_wins(tmp_path: Path) -> None:
+    """Conflict convention matches _install_json_merge: never clobber the
+    user. An existing [mcp_servers.vouch] value stays; only genuinely
+    missing keys (here the env table) are filled in."""
+    import tomllib
+
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text(
+        '[mcp_servers.vouch]\ncommand = "/opt/custom/vouch"\nargs = ["serve", "--debug"]\n',
+        encoding="utf-8",
+    )
+    result = install("codex", target=tmp_path, tier="T1")
+    data = tomllib.loads((codex_dir / "config.toml").read_text(encoding="utf-8"))
+
+    # the user's conflicting values win, deterministically
+    assert data["mcp_servers"]["vouch"]["command"] == "/opt/custom/vouch"
+    assert data["mcp_servers"]["vouch"]["args"] == ["serve", "--debug"]
+    # the missing env table is deep-merged in
+    assert data["mcp_servers"]["vouch"]["env"]["VOUCH_AGENT"] == "codex"
+    assert ".codex/config.toml" in result.merged
+
+
+def test_codex_toml_malformed_existing_is_skipped(tmp_path: Path) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text("= not valid toml [", encoding="utf-8")
+    before = (codex_dir / "config.toml").read_text(encoding="utf-8")
+    result = install("codex", target=tmp_path, tier="T1")
+    # unreadable user file is left untouched, not clobbered
+    assert (codex_dir / "config.toml").read_text(encoding="utf-8") == before
+    assert ".codex/config.toml" in result.skipped
+    assert ".codex/config.toml" not in result.merged
+
+
+def test_toml_dumps_roundtrips_shipped_shapes() -> None:
+    """The hand-rolled serializer must faithfully re-emit everything tomllib
+    can hand it from the config shapes we merge into: nested tables, arrays,
+    inline tables inside arrays, quoted keys, and scalar types."""
+    import tomllib
+
+    from vouch.install_adapter import _toml_dumps
+
+    data = {
+        "model": "gpt-5",
+        "temperature": 0.5,
+        "retries": 3,
+        "verbose": True,
+        "tags": ["a", "b"],
+        "weird key.name": "quoted",
+        "profiles": [{"name": "fast"}, {"name": "safe"}],
+        "mcp_servers": {
+            "vouch": {
+                "command": "vouch",
+                "args": ["serve"],
+                "env": {"VOUCH_AGENT": "codex"},
+            },
+        },
+    }
+    assert tomllib.loads(_toml_dumps(data)) == data
+
+
+def test_merge_toml_reports_no_change_when_subset() -> None:
+    from vouch.install_adapter import _merge_toml
+
+    dst = {"a": {"b": 1, "c": [1, 2]}, "top": "x"}
+    src = {"a": {"b": 999}}  # conflicting value: dst wins, nothing to add
+    assert _merge_toml(src, dst) is False
+    assert dst["a"]["b"] == 1
+
+
+def _write_manifest(tmp_path: Path, host: str, body: str, monkeypatch) -> None:
+    """Point the loader at a throwaway adapters dir holding one manifest."""
+    import vouch.install_adapter as ia
+
+    (tmp_path / host).mkdir(parents=True)
+    (tmp_path / host / "install.yaml").write_text(body, encoding="utf-8")
+    monkeypatch.setattr(ia, "ADAPTERS_DIR", tmp_path)
+
+
+def test_manifest_non_boolean_flag_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """A quoted `"false"` is a non-empty string; bool() would read it as
+    True and silently enable a merge. The loader must reject it."""
+    from vouch.install_adapter import _load_manifest
+
+    _write_manifest(tmp_path, "badhost", (
+        "host: badhost\n"
+        "tiers:\n"
+        "  T1:\n"
+        '    - { src: a, dst: b, toml_merge: "false" }\n'
+    ), monkeypatch)
+    with pytest.raises(AdapterError, match="`toml_merge` must be a boolean"):
+        _load_manifest("badhost")
+
+
+def test_manifest_multiple_strategies_rejected(tmp_path: Path, monkeypatch) -> None:
+    from vouch.install_adapter import _load_manifest
+
+    _write_manifest(tmp_path, "badhost", (
+        "host: badhost\n"
+        "tiers:\n"
+        "  T1:\n"
+        "    - { src: a, dst: b, json_merge: true, toml_merge: true }\n"
+    ), monkeypatch)
+    with pytest.raises(AdapterError, match="more than one of"):
+        _load_manifest("badhost")
+
+
+def test_manifest_boolean_flags_still_accepted(tmp_path: Path, monkeypatch) -> None:
+    from vouch.install_adapter import _load_manifest
+
+    _write_manifest(tmp_path, "okhost", (
+        "host: okhost\n"
+        "tiers:\n"
+        "  T1:\n"
+        "    - { src: a, dst: b, toml_merge: true }\n"
+    ), monkeypatch)
+    manifest = _load_manifest("okhost")
+    assert manifest.tiers["T1"][0].toml_merge is True
+
+
 # --- error paths ----------------------------------------------------------
 
 
