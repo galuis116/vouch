@@ -25,6 +25,7 @@ import yaml
 from . import __version__, bundle, health, volunteer_context
 from . import audit as audit_mod
 from . import capture as capture_mod
+from . import codex_rollout as codex_rollout_mod
 from . import compile as compile_mod
 from . import digest as digest_mod
 from . import fetch as fetch_mod
@@ -98,6 +99,7 @@ def _cli_errors() -> Iterator[None]:
         ProposalError,
         LifecycleError,
         migrations_mod.MigrationError,
+        codex_rollout_mod.CodexRolloutError,
     ) as e:
         raise click.ClickException(str(e)) from e
 
@@ -2019,6 +2021,53 @@ def capture_finalize_all_cmd(session_id: str | None, max_age_seconds: float) -> 
     result = capture_mod.finalize_all_except(
         store, sid, max_age_seconds=max_age_seconds,
     )
+    _emit_json(result)
+
+
+@capture.command("ingest-codex")
+@click.argument(
+    "rollout", required=False,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--latest", is_flag=True,
+    help="Resolve the newest codex rollout recorded for this project (by cwd).",
+)
+@click.option(
+    "--codex-home", type=click.Path(file_okay=False, path_type=Path), default=None,
+    help="Codex state dir holding sessions/ (default: $CODEX_HOME or ~/.codex).",
+)
+def capture_ingest_codex_cmd(
+    rollout: Path | None, latest: bool, codex_home: Path | None
+) -> None:
+    """Ingest one codex session rollout into a PENDING summary proposal.
+
+    Codex has no live hook stream; it persists each session as a rollout
+    jsonl instead. This maps the rollout's tool calls into the same
+    observation shape `capture observe` produces and reuses the existing
+    rollup, so the result is the same review-gated summary a claude
+    session yields. Re-ingesting a session is a no-op; review with
+    `vouch review`.
+    """
+    if (rollout is None) == (not latest):
+        raise click.ClickException("pass exactly one of ROLLOUT or --latest")
+    store = _load_store()
+    with _cli_errors():
+        if latest:
+            found = codex_rollout_mod.find_latest_rollout(
+                Path.cwd(), codex_home=codex_home
+            )
+            if found is None:
+                raise click.ClickException(
+                    "no codex rollout found for this project under "
+                    f"{(codex_home or codex_rollout_mod.default_codex_home()) / 'sessions'}; "
+                    "pass a rollout file explicitly"
+                )
+            rollout = found
+        assert rollout is not None
+        result = codex_rollout_mod.ingest_rollout(
+            store, rollout, generated_at=datetime.now(UTC).isoformat()
+        )
     _emit_json(result)
 
 
