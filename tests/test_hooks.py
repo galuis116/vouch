@@ -58,3 +58,28 @@ def test_no_hits_injects_nothing(
     monkeypatch.setattr(context.index_db, "search_semantic", lambda *a, **k: [])
     monkeypatch.setattr(context.index_db, "search", lambda *a, **k: [])
     assert hooks.build_claude_prompt_hook(store, json.dumps({"prompt": "zzznomatch"})) == ""
+
+
+def test_non_dict_json_payload_is_safe(store: KBStore) -> None:
+    for raw in ("null", "42", "true", "[1,2,3]", '"a string"'):
+        assert hooks.build_claude_prompt_hook(store, raw) == ""
+
+
+def test_build_context_pack_exception_is_swallowed(
+    store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(*a: object, **k: object) -> object:
+        raise RuntimeError("boom")
+    monkeypatch.setattr(hooks, "build_context_pack", _boom)
+    assert hooks.build_claude_prompt_hook(store, json.dumps({"prompt": "x"})) == ""
+
+
+def test_context_hook_cli_always_exits_zero_without_kb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from click.testing import CliRunner
+
+    from vouch.cli import cli
+    monkeypatch.chdir(tmp_path)  # no .vouch here
+    result = CliRunner().invoke(cli, ["context-hook"], input='{"prompt":"anything"}')
+    assert result.exit_code == 0

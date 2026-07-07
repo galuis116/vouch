@@ -2312,10 +2312,13 @@ def context_hook() -> None:
     from . import hooks
 
     stdin_text = sys.stdin.read()
-    try:
-        out = hooks.build_claude_prompt_hook(_load_store(), stdin_text)
-    except Exception:
-        out = ""
+    store = _capture_store()
+    out = ""
+    if store is not None:
+        try:
+            out = hooks.build_claude_prompt_hook(store, stdin_text)
+        except Exception:
+            out = ""
     if out:
         click.echo(out)
 

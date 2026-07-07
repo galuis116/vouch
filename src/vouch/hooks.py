@@ -11,10 +11,13 @@ nothing), so a hook failure can never block the user's turn.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from .context import build_context_pack
 from .storage import KBStore
+
+_log = logging.getLogger("vouch")
 
 _MAX_ITEMS = 8
 _MAX_CHARS = 2000
@@ -38,6 +41,8 @@ def build_claude_prompt_hook(store: KBStore, stdin_text: str) -> str:
         payload = json.loads(stdin_text) if stdin_text.strip() else {}
     except json.JSONDecodeError:
         payload = {"prompt": stdin_text}
+    if not isinstance(payload, dict):
+        payload = {}
     prompt = str(payload.get("prompt", "")).strip()
     if not prompt:
         return ""
@@ -46,6 +51,7 @@ def build_claude_prompt_hook(store: KBStore, stdin_text: str) -> str:
             store, query=prompt, limit=_MAX_ITEMS, max_chars=_MAX_CHARS,
         )
     except Exception:
+        _log.warning("context-hook: build_context_pack failed", exc_info=True)
         return ""
     body = _render(pack) if isinstance(pack, dict) else ""
     if not body:
