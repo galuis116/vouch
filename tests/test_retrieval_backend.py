@@ -79,23 +79,46 @@ def test_backend_substring_only(
     assert _backends(pack) == {"substring"}
 
 
-def test_backend_auto_prefers_embedding(
+def test_backend_auto_now_fuses(
     store: KBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Default `auto` tries embedding first when it returns hits."""
+    """`auto` no longer waterfalls embedding-first; it fuses embedding + fts5
+    (RRF) and tags hits `hybrid`."""
     _force_semantic_hit(monkeypatch)
     _set_backend(store, "auto")
     pack = context.build_context_pack(store, query="JWT")
-    assert any(item["backend"] == "embedding" for item in pack["items"])
+    assert pack["items"]
+    assert _backends(pack) == {"hybrid"}
 
 
-def test_unset_backend_defaults_to_auto(
+def test_unset_backend_fuses(
     store: KBStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A config with no retrieval.backend behaves like `auto`."""
+    """A config with no retrieval.backend behaves like fused `auto`."""
     _force_semantic_hit(monkeypatch)
     cfg = yaml.safe_load(store.config_path.read_text())
     cfg.get("retrieval", {}).pop("backend", None)
     store.config_path.write_text(yaml.safe_dump(cfg))
     pack = context.build_context_pack(store, query="JWT")
-    assert any(item["backend"] == "embedding" for item in pack["items"])
+    assert _backends(pack) == {"hybrid"}
+
+
+def test_backend_hybrid_merges_semantic_and_lexical(
+    store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`hybrid` returns the union of both retrievers, not first-non-empty."""
+    src = store.put_source(b"e2")
+    store.put_claim(Claim(id="c2", text="OAuth refresh flow", evidence=[src.id]))
+    health.rebuild_index(store)
+    monkeypatch.setattr(
+        context.index_db, "search_semantic",
+        lambda *a, **k: [("claim", "c1", "JWT token rotation", 0.99)],
+    )
+    monkeypatch.setattr(
+        context.index_db, "search",
+        lambda *a, **k: [("claim", "c2", "OAuth refresh flow", 0.88)],
+    )
+    _set_backend(store, "hybrid")
+    pack = context.build_context_pack(store, query="auth")
+    assert {item["id"] for item in pack["items"]} == {"c1", "c2"}
+    assert _backends(pack) == {"hybrid"}

@@ -19,6 +19,7 @@ from typing import Any, Literal, cast
 import yaml
 
 from . import graph, index_db
+from .embeddings.fusion import rrf_fuse
 from .models import ClaimStatus, ContextItem, ContextPack, ContextQuality
 from .scoping import (
     ViewerContext,
@@ -42,7 +43,7 @@ _RETRACTED_CLAIM_STATUSES = frozenset({
 
 ContextItemKind = Literal["claim", "page", "entity", "relation", "source"]
 
-_VALID_BACKENDS = ("auto", "embedding", "fts5", "substring")
+_VALID_BACKENDS = ("auto", "hybrid", "embedding", "fts5", "substring")
 
 
 def _configured_backend(store: KBStore) -> str:
@@ -82,7 +83,8 @@ def _retrieve(
     """Return list of (kind, id, summary, score, backend).
 
     The backend is chosen by `retrieval.backend` in config.yaml:
-      - "auto" (default): embedding -> FTS5 -> substring
+      - "auto" (default) / "hybrid": fuse embedding + FTS5 via RRF, falling
+        back to a substring scan only if both retrievers are empty
       - "embedding": semantic search only
       - "fts5": lexical FTS5 only
       - "substring": substring scan only
@@ -90,34 +92,38 @@ def _retrieve(
     backend = _configured_backend(store)
     fetch_limit = scoped_fetch_limit(limit, viewer)
 
-    if backend in ("auto", "embedding"):
+    if backend in ("auto", "hybrid"):
+        sem = index_db.search_semantic(store.kb_dir, query, limit=fetch_limit)
+        try:
+            lex = index_db.search(store.kb_dir, query, limit=fetch_limit)
+        except sqlite3.Error:
+            lex = []
+        fused = rrf_fuse(sem, lex, limit=fetch_limit)
+        if fused:
+            filtered = filter_hits(store, fused, viewer, limit=limit)
+            return [(k, i, s, sc, "hybrid") for k, i, s, sc in filtered]
+        # both retrievers empty -> fall through to the substring scan below.
+
+    if backend == "embedding":
         raw = index_db.search_semantic(store.kb_dir, query, limit=fetch_limit)
         if raw:
             filtered = filter_hits(store, raw, viewer, limit=limit)
             return [(k, i, s, sc, "embedding") for k, i, s, sc in filtered]
-        if backend == "embedding":
-            return []
+        return []
 
-    if backend in ("auto", "fts5"):
+    if backend == "fts5":
         try:
             hits = index_db.search(store.kb_dir, query, limit=fetch_limit)
             if hits:
                 filtered = filter_hits(store, hits, viewer, limit=limit)
                 return [(k, i, s, sc, "fts5") for k, i, s, sc in filtered]
         except sqlite3.Error:
-            # FTS5 unavailable, db missing, or schema mismatch — fall through
-            # to substring scan (auto) or empty (explicit fts5). Other
-            # exceptions are real bugs and propagate.
             pass
-        if backend == "fts5":
-            return []
+        return []
 
     substring_hits = store.search_substring(query, limit=fetch_limit)
     filtered = filter_hits(store, substring_hits, viewer, limit=limit)
-    return [
-        (k, i, s, sc, "substring")
-        for k, i, s, sc in filtered
-    ]
+    return [(k, i, s, sc, "substring") for k, i, s, sc in filtered]
 
 
 def _enrich_summary(store: KBStore, kind: str, artifact_id: str, summary: str) -> str:
