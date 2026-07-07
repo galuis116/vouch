@@ -58,8 +58,10 @@ route through the gate as proposals — a separate design).
 ### the profiles
 
 - **`minimal` (default)** — the everyday knowledge loop, agent-facing:
-  `kb_context`, `kb_search`, `kb_read_page`, `kb_propose_claim`,
-  `kb_propose_page`, `kb_status`, `kb_list_pending`. (7 tools.)
+  `kb_capabilities`, `kb_context`, `kb_search`, `kb_read_page`,
+  `kb_propose_claim`, `kb_propose_page`, `kb_status`, `kb_list_pending`.
+  (8 tools.) `kb_capabilities` stays in so the agent can always discover the
+  wider surface and how to widen its profile.
 - **`standard`** — minimal + the review lifecycle for unattended agents:
   `kb_approve`, `kb_reject`, `kb_supersede`, `kb_contradict`, `kb_confirm`,
   `kb_read_claim`, `kb_list_claims`, `kb_neighbors`, `kb_why`. (~16 tools.)
@@ -90,9 +92,13 @@ in `context.py:_retrieve`, add a `hybrid` branch that fuses semantic + fts
 results via the existing `embeddings/fusion.py:rrf_fuse` instead of the current
 first-non-empty waterfall; add `hybrid` to `_VALID_BACKENDS`; flip the
 `storage.py` default backend to `hybrid` (gracefully degrading to fts when the
-embeddings extra is absent). then, before the context-budget clip: a cheap
-recency multiplier and a greedy near-duplicate (MMR-style) drop. the CI recall
-eval (`eval/recall.py`, `eval.yml`, 0.05 regression floor) is the guardrail —
+embeddings extra is absent). `auto` — what every already-initialised KB has in
+its config — is redefined to mean the same fused path, so existing installs
+benefit without a config migration. then, before the context-budget clip: a
+greedy near-duplicate (MMR-style) drop so an agent never sees the same fact
+twice. (a recency multiplier is deferred to a follow-up — it needs per-hit
+timestamps that `_retrieve` does not currently carry.) the CI recall eval
+(`eval/recall.py`, `eval.yml`, 0.05 regression floor) is the guardrail —
 fusion should raise those numbers and can't regress them.
 
 ## move 3 — per-prompt auto-recall
@@ -125,12 +131,12 @@ bulk of the context win.
 
 ## verification
 
-- new `tests/test_mcp_profiles.py`: `minimal` exposes exactly the 7; `full`
+- new `tests/test_mcp_profiles.py`: `minimal` exposes exactly the 8; `full`
   exposes all 58; every profile name ⊆ `METHODS`; env var overrides config.
-- extended `tests/test_capabilities.py`: full mcp tools + cli commands vs
-  `METHODS` (the real 3-surface check).
+- extended `tests/test_capabilities.py`: full mcp tool set vs `METHODS` (the
+  real 3-surface check for the mcp surface).
 - recall eval green / improved with fusion (ci-gated).
-- manual before/after: fresh claude-code install shows ~7 tools not 58;
+- manual before/after: fresh claude-code install shows ~8 tools not 58;
   a prompt gets relevant context injected with 0 tool calls; record the
   cold-spawn hook latency.
 
