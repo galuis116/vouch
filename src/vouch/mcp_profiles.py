@@ -57,8 +57,10 @@ def _tool_name(method: str) -> str:
 def resolve_profile_name(config: dict[str, Any] | None = None) -> str:
     """Pick the active profile from env > config > default."""
     raw = os.environ.get("VOUCH_TOOL_PROFILE")
-    if not raw and config:
-        raw = config.get("mcp", {}).get("tool_profile")
+    if not raw and isinstance(config, dict):
+        mcp_cfg = config.get("mcp")
+        if isinstance(mcp_cfg, dict):
+            raw = mcp_cfg.get("tool_profile")
     name = str(raw).strip().lower() if raw else DEFAULT_PROFILE
     return name if name in PROFILES else DEFAULT_PROFILE
 

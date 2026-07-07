@@ -65,3 +65,12 @@ def test_resolve_default_is_minimal(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unknown_profile_falls_back_to_minimal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOUCH_TOOL_PROFILE", "bogus")
     assert mcp_profiles.resolve_profile_name(None) == "minimal"
+
+
+def test_resolve_tolerates_non_dict_mcp_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare `mcp:` key (YAML -> None) or non-dict mcp section must degrade
+    to the default, not crash `vouch serve`."""
+    monkeypatch.delenv("VOUCH_TOOL_PROFILE", raising=False)
+    assert mcp_profiles.resolve_profile_name({"mcp": None}) == "minimal"
+    assert mcp_profiles.resolve_profile_name({"mcp": "oops"}) == "minimal"
+    assert mcp_profiles.resolve_profile_name({"mcp": {}}) == "minimal"
