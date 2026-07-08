@@ -399,6 +399,13 @@ def _h_compile(p: dict) -> dict:
     return report.to_dict()
 
 
+def _h_summarize_session(p: dict) -> dict:
+    from . import session_split
+    return session_split.summarize(
+        _store(), p["session_id"], mode=p.get("mode", "auto"),
+    )
+
+
 def _h_propose_entity(p: dict) -> dict:
     pr = propose_entity(
         _store(),
@@ -752,6 +759,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.propose_claim": _h_propose_claim,
     "kb.propose_page": _h_propose_page,
     "kb.compile": _h_compile,
+    "kb.summarize_session": _h_summarize_session,
     "kb.propose_entity": _h_propose_entity,
     "kb.propose_relation": _h_propose_relation,
     "kb.approve": _h_approve,

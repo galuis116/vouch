@@ -99,7 +99,9 @@ def _stub_llm(tmp_path: Path, drafts: list[dict]) -> str:
     return f"cat {out}"
 
 
-def _config_with_split(store: KBStore, llm_cmd: str, threshold: int = 3, max_pages: int = 6) -> None:
+def _config_with_split(
+    store: KBStore, llm_cmd: str, threshold: int = 3, max_pages: int = 6
+) -> None:
     store.config_path.write_text(
         "capture:\n  split:\n"
         f"    threshold_observations: {threshold}\n"
@@ -203,3 +205,26 @@ def test_truncation_flagged_when_over_budget(store: KBStore, tmp_path: Path) -> 
     )
     res = session_split.summarize(store, "s1", mode="auto")
     assert res["truncated"] is True
+
+
+def test_kb_summarize_session_in_capabilities_and_handlers() -> None:
+    from vouch import capabilities
+    from vouch.jsonl_server import HANDLERS
+    assert "kb.summarize_session" in capabilities.METHODS
+    assert "kb.summarize_session" in HANDLERS
+
+
+def test_jsonl_handler_summarizes(store: KBStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    import vouch.jsonl_server as js
+    _observe(store, "s1", 5)
+    monkeypatch.setattr(js, "_store", lambda: store)
+    res = js.HANDLERS["kb.summarize_session"]({"session_id": "s1"})
+    assert res["mode"] == "mechanical"
+    assert res["summary_proposal_id"] is not None
+
+
+def test_starter_config_has_split_defaults() -> None:
+    from vouch.storage import _starter_config
+    split = _starter_config()["capture"]["split"]
+    assert split["threshold_observations"] == 40
+    assert split["enabled"] is True

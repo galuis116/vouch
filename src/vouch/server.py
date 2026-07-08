@@ -528,6 +528,22 @@ def kb_compile(
 
 
 @mcp.tool()
+def kb_summarize_session(
+    session_id: str,
+    mode: str = "auto",
+) -> dict[str, Any]:
+    """Summarize a captured session into PENDING page proposals.
+
+    Reads the host-neutral observation buffer for `session_id` and files either
+    one mechanical rollup page (small sessions) or several LLM-drafted topical
+    `session` pages (large sessions). `mode` is "auto" | "split" | "mechanical".
+    Long-running when it splits (the LLM call is synchronous). Never approves.
+    """
+    from . import session_split
+    return session_split.summarize(_store(), session_id, mode=mode)
+
+
+@mcp.tool()
 def kb_propose_entity(
     name: str,
     entity_type: str,

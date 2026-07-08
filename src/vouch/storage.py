@@ -81,9 +81,19 @@ def _starter_config() -> dict[str, Any]:
             "expire_pending_after_days": 90,
         },
         "capture": {
-            # auto-capture claude code sessions into pending summaries.
+            # auto-capture agent sessions into pending summaries.
             "enabled": True,
             "min_observations": 3,
+            "split": {
+                # llm topical split for large sessions; llm_cmd falls back to
+                # compile.llm_cmd when null. see session_split.py.
+                "enabled": True,
+                "llm_cmd": None,
+                "threshold_observations": 40,
+                "max_pages": 6,
+                "timeout_seconds": 180,
+                "max_input_chars": 60000,
+            },
         },
         "recall": {
             # inject a digest of all approved knowledge at session start.

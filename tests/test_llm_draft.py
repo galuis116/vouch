@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from vouch import llm_draft
 from vouch.llm_draft import LLMDraftError, parse_drafts, run_llm
 
 
@@ -22,7 +21,7 @@ def test_run_llm_returns_stdout(tmp_path: Path) -> None:
 
 
 def test_run_llm_nonzero_raises_with_label(tmp_path: Path) -> None:
-    with pytest.raises(LLMDraftError, match="capture.split.llm_cmd failed"):
+    with pytest.raises(LLMDraftError, match=r"capture\.split\.llm_cmd failed"):
         run_llm("false", "p", timeout_seconds=10.0, label="capture.split.llm_cmd")
 
 

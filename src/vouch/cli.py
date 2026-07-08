@@ -22,7 +22,7 @@ from typing import Any, Literal
 import click
 import yaml
 
-from . import __version__, bundle, health, volunteer_context
+from . import __version__, bundle, health, session_split, volunteer_context
 from . import audit as audit_mod
 from . import capture as capture_mod
 from . import codex_rollout as codex_rollout_mod
@@ -2018,8 +2018,10 @@ def capture_observe_cmd() -> None:
 
 @capture.command("finalize")
 @click.option("--session-id", default=None, help="Session id (else read from stdin payload).")
-def capture_finalize_cmd(session_id: str | None) -> None:
-    """Roll a session buffer into a PENDING summary (SessionEnd hook payload on stdin)."""
+@click.option("--split/--no-split", "force", default=None,
+              help="Force LLM topical split or a single mechanical page (default: size-gated).")
+def capture_finalize_cmd(session_id: str | None, force: bool | None) -> None:
+    """Roll a session buffer into PENDING summary proposal(s) (SessionEnd hook payload on stdin)."""
     payload: dict[str, Any] = {}
     if not sys.stdin.isatty():
         raw = sys.stdin.read()
@@ -2039,10 +2041,28 @@ def capture_finalize_cmd(session_id: str | None) -> None:
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     transcript_raw = payload.get("transcript_path")
     transcript = Path(str(transcript_raw)) if transcript_raw else None
+    mode = "auto" if force is None else ("split" if force else "mechanical")
     result = capture_mod.finalize(
         store, sid, cwd=cwd, project=cwd.name,
         generated_at=datetime.now(UTC).isoformat(),
-        transcript_path=transcript,
+        transcript_path=transcript, mode=mode,
+    )
+    _emit_json(result)
+
+
+@capture.command("summarize")
+@click.argument("session_id")
+@click.option("--split/--no-split", "force", default=None,
+              help="Force split or mechanical (default: size-gated auto).")
+def capture_summarize_cmd(session_id: str, force: bool | None) -> None:
+    """Summarize a captured session into PENDING page proposals (size-gated)."""
+    store = _capture_store()
+    if store is None:
+        _emit_json({"error": "no KB found"})
+        return
+    mode = "auto" if force is None else ("split" if force else "mechanical")
+    result = session_split.summarize(
+        store, session_id, mode=mode, generated_at=datetime.now(UTC).isoformat(),
     )
     _emit_json(result)
 

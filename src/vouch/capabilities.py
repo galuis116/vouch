@@ -68,6 +68,7 @@ METHODS = [
     "kb.session_end",
     "kb.volunteer_context",
     "kb.crystallize",
+    "kb.summarize_session",
     "kb.index_rebuild",
     "kb.lint",
     "kb.doctor",
