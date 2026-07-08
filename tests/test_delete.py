@@ -7,8 +7,17 @@ from pathlib import Path
 import pytest
 
 from vouch import index_db
-from vouch.models import Claim, Entity, EntityType, Page, ProposalKind, Relation, RelationType
-from vouch.proposals import ProposalError, referenced_by
+from vouch.models import (
+    Claim,
+    Entity,
+    EntityType,
+    Page,
+    ProposalKind,
+    ProposalStatus,
+    Relation,
+    RelationType,
+)
+from vouch.proposals import ProposalError, propose_delete, referenced_by
 from vouch.storage import ArtifactNotFoundError, KBStore
 
 
@@ -144,3 +153,49 @@ def test_relation_never_blocked(store: KBStore) -> None:
 def test_referenced_by_unknown_kind_raises(store: KBStore) -> None:
     with pytest.raises(ProposalError):
         referenced_by(store, "source", "x")
+
+
+def test_propose_delete_files_pending(store: KBStore) -> None:
+    _claim(store, "c1", "delete me")
+    pr = propose_delete(store, target_kind="claim", target_id="c1", proposed_by="agent")
+    assert pr.kind is ProposalKind.DELETE
+    assert pr.status is ProposalStatus.PENDING
+    assert pr.payload["target_kind"] == "claim"
+    assert pr.payload["id"] == "c1"
+    assert pr.payload["snapshot"]["text"] == "delete me"
+    # still pending in the queue
+    assert any(p.id == pr.id for p in store.list_proposals(ProposalStatus.PENDING))
+
+
+def test_propose_delete_unknown_target_raises(store: KBStore) -> None:
+    with pytest.raises(ProposalError, match="unknown claim id"):
+        propose_delete(store, target_kind="claim", target_id="ghost", proposed_by="a")
+
+
+def test_propose_delete_bad_kind_raises(store: KBStore) -> None:
+    with pytest.raises(ProposalError, match="unknown target_kind"):
+        propose_delete(store, target_kind="source", target_id="x", proposed_by="a")
+
+
+def test_propose_delete_referenced_claim_blocked(store: KBStore) -> None:
+    _claim(store, "c1")
+    store.put_page(Page(id="p1", title="P", body="", claims=["c1"]))
+    with pytest.raises(ProposalError, match="referenced by"):
+        propose_delete(store, target_kind="claim", target_id="c1", proposed_by="a")
+
+
+def test_propose_delete_claim_block_hints_supersede(store: KBStore) -> None:
+    _claim(store, "c1")
+    store.put_page(Page(id="p1", title="P", body="", claims=["c1"]))
+    with pytest.raises(ProposalError, match="supersede"):
+        propose_delete(store, target_kind="claim", target_id="c1", proposed_by="a")
+
+
+def test_propose_delete_dry_run_writes_nothing(store: KBStore) -> None:
+    _claim(store, "c1")
+    pr = propose_delete(
+        store, target_kind="claim", target_id="c1",
+        proposed_by="a", dry_run=True,
+    )
+    assert store.list_proposals(ProposalStatus.PENDING) == []
+    assert pr.id  # id is still returned for preview

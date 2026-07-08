@@ -316,6 +316,53 @@ def propose_relation(
     )
 
 
+def propose_delete(
+    store: KBStore,
+    *,
+    target_kind: str,
+    target_id: str,
+    proposed_by: str,
+    rationale: str | None = None,
+    session_id: str | None = None,
+    dry_run: bool = False,
+) -> Proposal:
+    """File a review-gated request to hard-delete a durable artifact.
+
+    Blocked (at propose time, re-checked at approve) if the target is still
+    referenced by another artifact — the maintainer must supersede or remove
+    the referrers first. The full artifact is snapshotted into the payload so
+    the decided proposal and audit event record exactly what was removed.
+    """
+    if target_kind not in _DELETE_KINDS:
+        raise ProposalError(
+            f"unknown target_kind {target_kind!r}; expected one of "
+            f"{sorted(_DELETE_KINDS)}"
+        )
+    getter = getattr(store, _DELETE_GETTERS[target_kind])
+    try:
+        artifact = getter(target_id)
+    except ArtifactNotFoundError as e:
+        raise ProposalError(f"unknown {target_kind} id: {target_id}") from e
+    refs = referenced_by(store, target_kind, target_id)
+    if refs:
+        hint = " (supersede it instead?)" if target_kind == "claim" else ""
+        raise ProposalError(
+            f"cannot delete {target_kind} {target_id}: referenced by "
+            + ", ".join(refs)
+            + hint
+        )
+    payload = {
+        "target_kind": target_kind,
+        "id": target_id,
+        "snapshot": artifact.model_dump(mode="json"),
+    }
+    return _file_proposal(
+        store, kind=ProposalKind.DELETE, payload=payload,
+        proposed_by=proposed_by, session_id=session_id,
+        rationale=rationale, dry_run=dry_run,
+    )
+
+
 # --- decisions ------------------------------------------------------------
 
 
