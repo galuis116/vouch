@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vouch import index_db
+from vouch import audit, index_db
 from vouch.models import (
     Claim,
     Entity,
@@ -17,7 +17,7 @@ from vouch.models import (
     Relation,
     RelationType,
 )
-from vouch.proposals import ProposalError, propose_delete, referenced_by
+from vouch.proposals import ProposalError, approve, check_approvable, propose_delete, referenced_by
 from vouch.storage import ArtifactNotFoundError, KBStore
 
 
@@ -199,3 +199,78 @@ def test_propose_delete_dry_run_writes_nothing(store: KBStore) -> None:
     )
     assert store.list_proposals(ProposalStatus.PENDING) == []
     assert pr.id  # id is still returned for preview
+
+
+def _propose_and_approve_delete(store: KBStore, kind: str, tid: str) -> None:
+    pr = propose_delete(store, target_kind=kind, target_id=tid, proposed_by="agent")
+    approve(store, pr.id, approved_by="reviewer")
+
+
+def test_approve_delete_removes_claim_and_indexes(store: KBStore) -> None:
+    _claim(store, "c1", "gone soon")
+    _propose_and_approve_delete(store, "claim", "c1")
+    assert not store._claim_path("c1").exists()
+    with index_db.open_db(store.kb_dir) as conn:
+        assert conn.execute("SELECT count(*) FROM claims_fts WHERE id='c1'").fetchone()[0] == 0
+    events = [e.event for e in audit.read_events(store.kb_dir)]
+    assert "claim.delete" in events
+
+
+def test_approve_delete_page(store: KBStore) -> None:
+    store.put_page(Page(id="p1", title="P", body="x"))
+    _propose_and_approve_delete(store, "page", "p1")
+    assert not store._page_path("p1").exists()
+
+
+def test_approve_delete_entity(store: KBStore) -> None:
+    store.put_entity(Entity(id="e1", name="E", type=EntityType.CONCEPT))
+    _propose_and_approve_delete(store, "entity", "e1")
+    assert not store._entity_path("e1").exists()
+
+
+def test_approve_delete_relation(store: KBStore) -> None:
+    _claim(store, "c1")
+    _claim(store, "c2")
+    store.put_relation(Relation(
+        id="c1--supports--c2", source="c1",
+        relation=RelationType.SUPPORTS, target="c2",
+    ))
+    _propose_and_approve_delete(store, "relation", "c1--supports--c2")
+    assert not store._relation_path("c1--supports--c2").exists()
+
+
+def test_approve_rechecks_reference_added_after_propose(store: KBStore) -> None:
+    _claim(store, "c1")
+    pr = propose_delete(store, target_kind="claim", target_id="c1", proposed_by="agent")
+    # a page starts referencing c1 AFTER the proposal was filed
+    store.put_page(Page(id="p1", title="P", body="", claims=["c1"]))
+    with pytest.raises(ProposalError, match="still referenced"):
+        approve(store, pr.id, approved_by="reviewer")
+    # target survives, proposal stays pending
+    assert store._claim_path("c1").exists()
+    assert any(p.id == pr.id for p in store.list_proposals(ProposalStatus.PENDING))
+
+
+def test_approve_delete_idempotent_when_already_gone(store: KBStore) -> None:
+    _claim(store, "c1")
+    pr = propose_delete(store, target_kind="claim", target_id="c1", proposed_by="agent")
+    store.delete_claim("c1")  # simulate a crash-retry: file already removed
+    result = approve(store, pr.id, approved_by="reviewer")
+    assert result.id == "c1"
+    # proposal is finalized (moved out of pending)
+    assert not any(p.id == pr.id for p in store.list_proposals(ProposalStatus.PENDING))
+
+
+def test_delete_forbids_self_approval(store: KBStore) -> None:
+    _claim(store, "c1")
+    pr = propose_delete(store, target_kind="claim", target_id="c1", proposed_by="same")
+    with pytest.raises(ProposalError, match="forbidden_self_approval"):
+        approve(store, pr.id, approved_by="same")
+
+
+def test_check_approvable_flags_referenced_delete(store: KBStore) -> None:
+    _claim(store, "c1")
+    pr = propose_delete(store, target_kind="claim", target_id="c1", proposed_by="agent")
+    store.put_page(Page(id="p1", title="P", body="", claims=["c1"]))
+    reason = check_approvable(store, pr.id, approved_by="reviewer")
+    assert reason is not None and "referenced by" in reason

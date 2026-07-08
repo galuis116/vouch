@@ -459,6 +459,22 @@ def _payload_block_reason(store: KBStore, proposal: Proposal) -> str | None:
             Entity(**payload)
         except (ValidationError, TypeError) as e:
             return f"invalid entity payload: {e}"
+    elif proposal.kind == ProposalKind.DELETE:
+        target_kind = str(payload.get("target_kind", ""))
+        target_id = str(payload.get("id", ""))
+        if target_kind not in _DELETE_KINDS:
+            return f"invalid delete target_kind: {target_kind!r}"
+        getter = getattr(store, _DELETE_GETTERS[target_kind])
+        try:
+            getter(target_id)
+        except ArtifactNotFoundError:
+            return None  # already gone → idempotent approve is fine
+        refs = referenced_by(store, target_kind, target_id)
+        if refs:
+            return (
+                f"cannot delete {target_kind} {target_id}: referenced by "
+                + ", ".join(refs)
+            )
     return None
 
 
@@ -504,7 +520,7 @@ def approve(
     # Exception: PAGE proposals may legitimately target an existing page when
     # filed by vault_to_kb (vault edit flow) — the approve path handles that
     # via update_page rather than put_page.
-    if proposal.kind != ProposalKind.PAGE:
+    if proposal.kind not in (ProposalKind.PAGE, ProposalKind.DELETE):
         _ensure_no_existing_artifact(store, proposal.kind, payload["id"])
     result: Claim | Page | Entity | Relation
     if proposal.kind == ProposalKind.CLAIM:
@@ -560,6 +576,8 @@ def approve(
                 type=entity.type.value, aliases=entity.aliases,
             )
         result = entity
+    elif proposal.kind == ProposalKind.DELETE:
+        result = _approve_delete(store, proposal, approved_by=approved_by)
     else:  # RELATION
         rel = Relation(**payload)
         store.put_relation(rel)
@@ -785,6 +803,58 @@ def referenced_by(store: KBStore, target_kind: str, target_id: str) -> list[str]
                 refs.append(f"relation {rel.id!r}")
     # target_kind == "relation": edges have no inbound refs → refs stays empty
     return refs
+
+
+def _reconstruct_deleted(
+    target_kind: str, snapshot: dict[str, Any]
+) -> Claim | Page | Entity | Relation:
+    """Rebuild a typed model from a delete proposal's snapshot.
+
+    Used only on the idempotent path (artifact already gone) so the approve
+    surfaces still receive a `{kind, id}` result.
+    """
+    if target_kind == "claim":
+        return Claim(**snapshot)
+    if target_kind == "page":
+        return Page(**snapshot)
+    if target_kind == "entity":
+        return Entity(**snapshot)
+    return Relation(**snapshot)
+
+
+def _approve_delete(
+    store: KBStore, proposal: Proposal, *, approved_by: str
+) -> Claim | Page | Entity | Relation:
+    """Execute an approved DELETE proposal: remove the artifact + index rows.
+
+    Re-checks references at approve time (they may have appeared since the
+    proposal was filed). Idempotent: if the artifact is already gone, finalize
+    the proposal without erroring.
+    """
+    payload = proposal.payload
+    target_kind = str(payload["target_kind"])
+    target_id = str(payload["id"])
+    snapshot = dict(payload.get("snapshot") or {})
+    getter = getattr(store, _DELETE_GETTERS[target_kind])
+    try:
+        artifact = getter(target_id)
+    except ArtifactNotFoundError:
+        return _reconstruct_deleted(target_kind, snapshot)
+    refs = referenced_by(store, target_kind, target_id)
+    if refs:
+        raise ProposalError(
+            f"cannot delete {target_kind} {target_id}: still referenced by "
+            + ", ".join(refs)
+        )
+    deleter = getattr(store, f"delete_{target_kind}")
+    deleter(target_id)
+    with index_db.open_db(store.kb_dir) as conn:
+        index_db.deindex(conn, kind=target_kind, id=target_id)
+    audit.log_event(
+        store.kb_dir, event=f"{target_kind}.delete", actor=approved_by,
+        object_ids=[target_id], data={"snapshot": snapshot},
+    )
+    return artifact
 
 
 def _ensure_no_existing_artifact(
