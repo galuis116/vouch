@@ -244,17 +244,27 @@ def test_build_session_rows_lists_open_buffer(store: KBStore) -> None:
     assert row["last_activity"] is not None
 
 
-def test_build_session_rows_lists_pending_summary(store: KBStore) -> None:
+def test_build_session_rows_mechanical_pending_needs_narration(store: KBStore) -> None:
     from vouch import capture
     _observe(store, "sess-filed", 5)
     capture.finalize(store, "sess-filed", cwd=None, generated_at="2026-07-09T00:00:00Z")
     rows = session_split.build_session_rows(store)
     row = next(r for r in rows if r["session_id"] == "sess-filed")
     assert row["stage"] == "pending"
-    assert row["summarized"] is True
+    # a mechanical rollup has not been LLM-narrated → still needs a summary
+    assert row["summarized"] is False
     assert row["proposal_id"] is not None
     assert row["kind"] == "page"
     assert row["title"]
+
+
+def test_build_session_rows_split_proposal_is_summarized(store: KBStore, tmp_path: Path) -> None:
+    _observe(store, "sess-split", 5)
+    cmd = _stub_llm(tmp_path, [{"title": "the work thread", "body": "narrative " * 20}])
+    _config_with_split(store, cmd, threshold=3)
+    session_split.summarize(store, "sess-split", mode="auto")
+    rows = session_split.build_session_rows(store)
+    assert all(r["summarized"] for r in rows if r["session_id"] == "sess-split")
 
 
 def test_finalized_session_not_double_listed_as_buffer(store: KBStore) -> None:
@@ -291,6 +301,50 @@ def test_summarize_fallback_flags_llm_failed(store: KBStore) -> None:
     assert res["mode"] == "fallback"
     assert res["summarized"] is False
     assert res["skipped"] == "llm-failed"
+
+
+def test_renarrate_filed_mechanical_summary(store: KBStore, tmp_path: Path) -> None:
+    from vouch import capture
+    from vouch.models import ProposalStatus
+    _observe(store, "sess-m", 5)
+    capture.finalize(store, "sess-m", cwd=None, generated_at="2026-07-09T00:00:00Z")
+    mech = store.list_proposals(ProposalStatus.PENDING)
+    assert len(mech) == 1
+    mech_id = mech[0].id
+    assert not capture.buffer_path(store, "sess-m").exists()  # buffer gone
+
+    cmd = _stub_llm(tmp_path, [
+        {"title": "narrated: the parser work", "body": "narrative prose " * 15},
+    ])
+    _config_with_split(store, cmd, threshold=3)
+    res = session_split.summarize(store, "sess-m", mode="auto")
+
+    assert res["mode"] == "renarrated"
+    assert res["summarized"] is True
+    assert res["superseded"] == mech_id
+    # the mechanical proposal is superseded (rejected); the narrated page is pending
+    assert store.get_proposal(mech_id).status == ProposalStatus.REJECTED
+    pending = store.list_proposals(ProposalStatus.PENDING)
+    assert [p.id for p in pending] == res["summary_proposal_ids"]
+    assert all(p.proposed_by == session_split.SPLIT_ACTOR for p in pending)
+
+
+def test_renarrate_without_llm_leaves_mechanical_intact(store: KBStore) -> None:
+    from vouch import capture
+    from vouch.models import ProposalStatus
+    _observe(store, "sess-m", 5)
+    capture.finalize(store, "sess-m", cwd=None, generated_at="2026-07-09T00:00:00Z")
+    mech_id = store.list_proposals(ProposalStatus.PENDING)[0].id
+    res = session_split.summarize(store, "sess-m", mode="auto")  # no llm_cmd
+    assert res["summarized"] is False
+    assert res["skipped"] == "not-configured"
+    assert store.get_proposal(mech_id).status == ProposalStatus.PENDING  # untouched
+
+
+def test_summarize_no_buffer_no_proposal_skips(store: KBStore) -> None:
+    res = session_split.summarize(store, "never-seen", mode="auto")
+    assert res["summarized"] is False
+    assert res["skipped"] == "no-pending-summary-for-session"
 
 
 def test_kb_list_sessions_registered_and_returns_sessions(

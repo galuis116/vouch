@@ -23,7 +23,7 @@ from . import capture, llm_draft
 from . import compile as compile_mod
 from .llm_draft import LLMDraftError
 from .models import ProposalStatus
-from .proposals import _slugify, propose_page
+from .proposals import _slugify, propose_page, reject
 from .storage import KBStore
 
 logger = logging.getLogger(__name__)
@@ -117,10 +117,20 @@ def summarize(
         changed_files, git_stat = [], ""
     total = len(observations) + len(changed_files)
     if total < cfg.min_observations:
+        # The buffer is empty/gone. If a mechanical summary was already filed
+        # for this session, the intent (e.g. the review console's Summarize) is
+        # to narrate that filed record with the LLM, not to re-read the buffer.
+        if mode != "mechanical":
+            renarrated = _try_renarrate(store, session_id, split_cfg=load_split_config(store))
+            if renarrated is not None:
+                if path.exists():
+                    path.unlink()
+                return renarrated
         if path.exists():
             path.unlink()
+        reason = "below-min" if observations else "no-pending-summary-for-session"
         return {"captured": total, "summary_proposal_id": None,
-                "summary_proposal_ids": [], "mode": "skipped", "skipped": "below-min",
+                "summary_proposal_ids": [], "mode": "skipped", "skipped": reason,
                 "session_id": session_id, "summarized": False, "proposal_id": None}
 
     split_cfg = load_split_config(store)
@@ -291,8 +301,14 @@ def build_split_prompt(
     taken = [f"- {p.title}" for p in pages] + [f"- {n} [pending]" for n in sorted(pending)]
     lines += ["TAKEN TOPICS (do NOT redraft any of these):"]
     lines += taken or ["- (none)"]
-    lines += [
-        "",
+    lines += ["", *_rules_lines(max_pages)]
+    return "\n".join(lines), truncated
+
+
+def _rules_lines(max_pages: int) -> list[str]:
+    """The shared clustering rules + JSON output contract for both the
+    buffer split and the re-narrate-from-record prompts."""
+    return [
         "RULES",
         f"- Cluster the activity into at most {max_pages} coherent TOPICS —",
         "  distinct threads of work in this session. Draft one page per topic.",
@@ -306,7 +322,95 @@ def build_split_prompt(
         "OUTPUT: print ONLY a JSON array, no code fences, no commentary.",
         "Each element: {\"title\": str, \"body\": str}",
     ]
-    return "\n".join(lines), truncated
+
+
+def _skip(session_id: str, reason: str, *, proposal_id: str | None = None) -> dict[str, Any]:
+    return {"captured": 0, "summary_proposal_id": proposal_id, "summary_proposal_ids": [],
+            "mode": "skipped", "skipped": reason, "session_id": session_id,
+            "summarized": False, "proposal_id": proposal_id}
+
+
+def _eligible_mechanical_proposal(store: KBStore, session_id: str) -> Any | None:
+    """The pending, not-yet-narrated session summary for `session_id`, if any.
+
+    Only mechanical rollups (proposed by vouch-capture) are eligible; a
+    session-split proposal is already narrated.
+    """
+    for prop in store.list_proposals(ProposalStatus.PENDING):
+        if prop.kind.value != "page":
+            continue
+        if str(prop.payload.get("type") or "") != capture.CAPTURE_PAGE_TYPE:
+            continue
+        if prop.session_id != session_id:
+            continue
+        if prop.proposed_by != capture.CAPTURE_ACTOR:
+            continue
+        return prop
+    return None
+
+
+def build_renarrate_prompt(store: KBStore, body: str, *, title: str, max_pages: int) -> str:
+    """Prompt to narrate an already-filed mechanical session record into
+    topical pages. Source is the filed proposal's markdown body (the buffer is
+    gone by the time a filed summary is re-narrated)."""
+    lines = [
+        "You are the session historian for this project's knowledge base. You are",
+        "given a mechanically-generated session record. Rewrite it into coherent,",
+        "narrated topical pages — one per distinct thread of work.",
+        "",
+    ]
+    if title:
+        lines += [f"SESSION RECORD TITLE: {title}", ""]
+    lines += ["SESSION RECORD (markdown):", body, ""]
+    pages = store.list_pages()
+    pending = compile_mod._pending_page_names(store)
+    taken = [f"- {p.title}" for p in pages] + [f"- {n} [pending]" for n in sorted(pending)]
+    lines += ["TAKEN TOPICS (do NOT redraft any of these):"]
+    lines += taken or ["- (none)"]
+    lines += ["", *_rules_lines(max_pages)]
+    return "\n".join(lines)
+
+
+def _try_renarrate(
+    store: KBStore, session_id: str, *, split_cfg: SplitConfig
+) -> dict[str, Any] | None:
+    """Narrate a filed mechanical summary with the LLM, superseding it.
+
+    Returns None when no eligible mechanical proposal exists (caller falls
+    through to the below-min skip). On success files narrated page proposals
+    and rejects the mechanical one. On LLM failure leaves it intact.
+    """
+    prop = _eligible_mechanical_proposal(store, session_id)
+    if prop is None:
+        return None
+    cmd = split_cfg.llm_cmd or compile_mod.load_config(store).llm_cmd
+    if not cmd:
+        return _skip(session_id, "not-configured", proposal_id=prop.id)
+    body = str(prop.payload.get("body") or "")
+    title = str(prop.payload.get("title") or "")
+    try:
+        prompt = build_renarrate_prompt(store, body, title=title, max_pages=split_cfg.max_pages)
+        raw = llm_draft.run_llm(
+            cmd, prompt, timeout_seconds=split_cfg.timeout_seconds,
+            label="capture.split.llm_cmd",
+        )
+        drafts = llm_draft.parse_drafts(raw, noun="page")
+        ids, dropped = _file_drafts(store, session_id, drafts, split_cfg.max_pages)
+    except LLMDraftError as e:
+        logger.warning("session_split: renarrate failed for %s (%s)", session_id, e)
+        return _skip(session_id, "llm-failed", proposal_id=prop.id)
+    if not ids:
+        logger.warning("session_split: renarrate produced no valid drafts for %s", session_id)
+        return _skip(session_id, "llm-failed", proposal_id=prop.id)
+    reject(
+        store, prop.id, rejected_by=SPLIT_ACTOR,
+        reason="superseded by llm narrative summary",
+    )
+    _audit_split(store, session_id, ids, dropped, 0, False)
+    return {"captured": 0, "summary_proposal_id": ids[0], "summary_proposal_ids": ids,
+            "mode": "renarrated", "dropped": dropped, "truncated": False,
+            "session_id": session_id, "summarized": True, "proposal_id": ids[0],
+            "superseded": prop.id}
 
 
 def _file_drafts(
@@ -391,13 +495,17 @@ def build_session_rows(store: KBStore) -> list[dict[str, Any]]:
             continue
         if prop.session_id:
             pending_session_ids.add(prop.session_id)
+        # a mechanical rollup (vouch-capture) still needs an LLM narrative;
+        # only a session-split proposal counts as already summarized.
+        tags = prop.payload.get("tags") or []
+        summarized = prop.proposed_by == SPLIT_ACTOR or "split" in tags
         rows.append({
             "session_id": prop.session_id,
             "stage": "pending",
             "proposal_id": prop.id,
             "kind": "page",
             "title": prop.payload.get("title"),
-            "summarized": True,
+            "summarized": summarized,
             "observations": None,
             "last_activity": prop.proposed_at.isoformat(),
         })
