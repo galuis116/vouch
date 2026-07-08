@@ -74,7 +74,7 @@ survive.
 | **claim** | page `claims[]`; relation `source`/`target`; another claim's `supersedes` / `superseded_by` / `contradicts` | unlink `claims/<id>.yaml` | `claims_fts`, `embedding_index(claim,id)`, `prov_edges` touching id |
 | **page** | relation `source`/`target` (pages are valid relation endpoints) | unlink `pages/<id>.md` | `pages_fts`, `embedding_index(page,id)`, `prov_edges` touching id |
 | **entity** | claim `entities[]`; page `entities[]`; relation `source`/`target` | unlink `entities/<id>.yaml` | `entities_fts`, `embedding_index(entity,id)`, `prov_edges` touching id |
-| **relation** | *nothing* — an edge has no inbound refs → always deletable | unlink `relations/<id>.yaml` | `prov_edges` touching id (relations are not in FTS or embeddings) |
+| **relation** | *nothing* — an edge has no inbound refs → always deletable | unlink `relations/<id>.yaml` | `embedding_index(relation,id)`, `prov_edges` touching id (relations are embedded on write but never in FTS) |
 
 a consequence worth stating plainly: to delete a page or entity that a
 relation points at, you first delete those inbound relations (relations
@@ -164,7 +164,11 @@ path treats that as the idempotent already-deleted case).
 `index_db.py` gains `deindex(conn, *, kind, id)`:
 
 * `kind in {claim, page, entity}` → `DELETE FROM <kind>s_fts WHERE id=?`
-  and `DELETE FROM embedding_index WHERE kind=? AND id=?`.
+  (relations have no FTS table).
+* all four kinds → `DELETE FROM embedding_index WHERE kind=? AND id=?`.
+  every `put_*` calls `_embed_and_store`, so an embedding row can exist
+  for any kind, relations included (present only when the embeddings
+  extra is installed; the delete is a harmless no-op otherwise).
 * all kinds → remove `prov_edges` rows referencing the id (as `src_id`
   or `dst_id`). `prov_edges` is otherwise derived and rebuildable via
   `kb.provenance_rebuild`; removing the touched rows inline keeps
