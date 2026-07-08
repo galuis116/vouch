@@ -605,18 +605,23 @@ def kb_propose_relation(
 
 @mcp.tool()
 def kb_propose_delete(
-    target_kind: str, target_id: str, rationale: str | None = None
+    target_kind: str, target_id: str, rationale: str | None = None,
+    session_id: str | None = None, dry_run: bool = False,
 ) -> dict[str, Any]:
     """Propose hard-deleting a durable artifact (claim/page/entity/relation).
 
     Files a PENDING delete request that a *different* reviewer approves via
     kb.approve. Refused if the target is still referenced by another artifact.
     """
-    pr = propose_delete(
-        _store(), target_kind=target_kind, target_id=target_id,
-        proposed_by=_agent(), rationale=rationale,
-    )
-    return {"proposal_id": pr.id, "status": pr.status.value, "kind": pr.kind.value}
+    try:
+        pr = propose_delete(
+            _store(), target_kind=target_kind, target_id=target_id,
+            proposed_by=_agent(), rationale=rationale,
+            session_id=session_id, dry_run=dry_run,
+        )
+    except (ProposalError, ArtifactNotFoundError, ValueError) as e:
+        raise ValueError(str(e)) from e
+    return _proposal_response(pr, dry_run)
 
 
 def _proposal_response(result, dry_run: bool) -> dict[str, Any]:

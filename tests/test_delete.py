@@ -19,6 +19,7 @@ from vouch.models import (
     RelationType,
 )
 from vouch.proposals import ProposalError, approve, check_approvable, propose_delete, referenced_by
+from vouch.server import kb_propose_delete
 from vouch.storage import ArtifactNotFoundError, KBStore
 
 
@@ -294,3 +295,24 @@ def test_jsonl_propose_delete_end_to_end(store: KBStore, monkeypatch) -> None:
     assert result["kind"] == "delete"
     assert result["status"] == "pending"
     assert result["proposal_id"]
+
+
+def test_mcp_propose_delete_referenced_claim_raises_value_error(
+    store: KBStore, monkeypatch,
+) -> None:
+    """The mcp tool must translate ProposalError -> ValueError like its siblings."""
+    monkeypatch.chdir(store.root)
+    _claim(store, "c1")
+    store.put_page(Page(id="p1", title="P", body="", claims=["c1"]))
+    with pytest.raises(ValueError, match="referenced by"):
+        kb_propose_delete(target_kind="claim", target_id="c1")
+
+
+def test_mcp_propose_delete_dry_run_writes_nothing(store: KBStore, monkeypatch) -> None:
+    monkeypatch.chdir(store.root)
+    _claim(store, "c1", "dry run me")
+    result = kb_propose_delete(target_kind="claim", target_id="c1", dry_run=True)
+    assert result["dry_run"] is True
+    assert result["status"] == "pending"
+    assert result["proposal_id"]
+    assert store.list_proposals(ProposalStatus.PENDING) == []
