@@ -13,7 +13,15 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from .capture import _read_observations, buffer_path
+
+if TYPE_CHECKING:
+    from .storage import KBStore
+
+MAX_FILE_BYTES = 25 * 1024 * 1024
+MAX_MESSAGES = 2000
 
 # Session ids are UUID-shaped; reject anything else so a hostile id can't
 # widen a glob or traverse out of the projects tree.
@@ -225,3 +233,49 @@ def parse_claude_transcript(path: Path, *, max_messages: int = 2000) -> dict[str
                 })
     flush()
     return {"session": session, "messages": messages, "truncated": truncated}
+
+
+def parse_codex_transcript(path: Path, *, max_messages: int = 2000) -> dict[str, Any]:
+    raise NotImplementedError("codex transcript parsing lands in Task 9")
+
+
+def _degraded(store: KBStore, session_id: str, reason: str) -> dict[str, Any]:
+    obs = _read_observations(buffer_path(store, session_id))
+    return {"available": False, "reason": reason, "observations": obs}
+
+
+def load_transcript(
+    store: KBStore, session_id: str, *, agent: str | None = None
+) -> dict[str, Any]:
+    """Locate + parse the raw transcript for ``session_id``.
+
+    ``agent`` restricts the search ("claude" | "codex"); when None both are
+    tried. Returns the normalized schema on success, or a degraded result
+    (compact capture observations) when the raw file is missing/too large.
+    """
+    path: Path | None = None
+    source_agent = ""
+    if agent in (None, "claude"):
+        path = find_claude_file(session_id)
+        if path is not None:
+            source_agent = "claude"
+    if path is None and agent in (None, "codex"):
+        from . import codex_rollout
+
+        path = codex_rollout.find_rollout_by_session_id(session_id)
+        if path is not None:
+            source_agent = "codex"
+    if path is None:
+        return _degraded(store, session_id, f"raw transcript not found for session {session_id}")
+    try:
+        size = path.stat().st_size
+    except OSError as e:
+        return _degraded(store, session_id, f"cannot read transcript: {e}")
+    if size > MAX_FILE_BYTES:
+        return _degraded(store, session_id, f"transcript too large to render ({size} bytes)")
+
+    if source_agent == "claude":
+        parsed = parse_claude_transcript(path, max_messages=MAX_MESSAGES)
+    else:
+        parsed = parse_codex_transcript(path, max_messages=MAX_MESSAGES)
+    return {"available": True, "source": {"agent": source_agent, "path": str(path)}, **parsed}

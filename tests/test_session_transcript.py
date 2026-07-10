@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from vouch import transcript
+from vouch import capture, transcript
+from vouch.storage import KBStore
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -114,3 +115,52 @@ def test_parse_claude_tolerates_malformed_lines(tmp_path: Path) -> None:
     out = transcript.parse_claude_transcript(f)
     assert len(out["messages"]) == 1
     assert out["messages"][0]["blocks"] == [{"type": "text", "text": "hey"}]
+
+
+# --- Task 3: load_transcript orchestrator ---------------------------------
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> KBStore:
+    return KBStore.init(tmp_path)
+
+
+def test_load_transcript_available(
+    tmp_path: Path, store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "projects"
+    sid = "ad5d5e5f-0097-494c-8316-b01aed5dabf2"
+    f = root / "-repo" / f"{sid}.jsonl"
+    _write_jsonl(f, _CLAUDE_LINES)
+    monkeypatch.setenv("VOUCH_CLAUDE_PROJECTS_DIR", str(root))
+    out = transcript.load_transcript(store, sid)
+    assert out["available"] is True
+    assert out["source"] == {"agent": "claude", "path": str(f)}
+    assert out["session"]["title"] == "Fix the bug"
+
+
+def test_load_transcript_degrades_to_observations(
+    store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VOUCH_CLAUDE_PROJECTS_DIR", str(store.kb_dir / "none"))
+    sid = "99999999-9999-9999-9999-999999999999"
+    capture.observe(store, sid, tool="Edit", summary="Edited x.go")
+    out = transcript.load_transcript(store, sid)
+    assert out["available"] is False
+    assert out["observations"][0]["tool"] == "Edit"
+    assert "reason" in out
+
+
+def test_load_transcript_degrades_when_oversized(
+    tmp_path: Path, store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "projects"
+    sid = "88888888-8888-8888-8888-888888888888"
+    f = root / "-repo" / f"{sid}.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("x" * 32, encoding="utf-8")
+    monkeypatch.setenv("VOUCH_CLAUDE_PROJECTS_DIR", str(root))
+    monkeypatch.setattr(transcript, "MAX_FILE_BYTES", 16)
+    out = transcript.load_transcript(store, sid)
+    assert out["available"] is False
+    assert "too large" in out["reason"]
