@@ -68,6 +68,7 @@ METHODS = [
     "kb.session_start",
     "kb.session_end",
     "kb.list_sessions",
+    "kb.session_transcript",
     "kb.volunteer_context",
     "kb.crystallize",
     "kb.summarize_session",

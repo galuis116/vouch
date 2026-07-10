@@ -164,3 +164,44 @@ def test_load_transcript_degrades_when_oversized(
     out = transcript.load_transcript(store, sid)
     assert out["available"] is False
     assert "too large" in out["reason"]
+
+
+# --- Task 4: RPC handler --------------------------------------------------
+
+
+def test_capabilities_advertises_session_transcript() -> None:
+    from vouch.capabilities import capabilities
+    from vouch.jsonl_server import HANDLERS
+
+    assert "kb.session_transcript" in capabilities().methods
+    assert "kb.session_transcript" in HANDLERS
+
+
+def test_handler_missing_session_id_is_missing_param() -> None:
+    from vouch.jsonl_server import handle_request
+
+    resp = handle_request({"id": "1", "method": "kb.session_transcript", "params": {}})
+    assert resp["ok"] is False
+    assert resp["error"]["code"] == "missing_param"
+
+
+def test_handler_bad_agent_is_invalid_request() -> None:
+    from vouch.jsonl_server import handle_request
+
+    resp = handle_request({
+        "id": "2", "method": "kb.session_transcript",
+        "params": {"session_id": "11111111-1111-1111-1111-111111111111", "agent": "grok"},
+    })
+    assert resp["ok"] is False
+    assert resp["error"]["code"] == "invalid_request"
+
+
+def test_handler_returns_degraded_when_absent() -> None:
+    from vouch.jsonl_server import handle_request
+
+    resp = handle_request({
+        "id": "3", "method": "kb.session_transcript",
+        "params": {"session_id": "11111111-1111-1111-1111-111111111111"},
+    })
+    assert resp["ok"] is True
+    assert resp["result"]["available"] is False

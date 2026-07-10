@@ -412,6 +412,15 @@ def _h_list_sessions(p: dict) -> dict:
     return {"sessions": session_split.build_session_rows(_store())}
 
 
+def _h_session_transcript(p: dict) -> dict:
+    from . import transcript
+    session_id = p["session_id"]
+    agent = p.get("agent")
+    if agent is not None and agent not in ("claude", "codex"):
+        raise ValueError(f"unknown agent: {agent!r} (expected 'claude' or 'codex')")
+    return transcript.load_transcript(_store(), session_id, agent=agent)
+
+
 def _h_propose_entity(p: dict) -> dict:
     pr = propose_entity(
         _store(),
@@ -785,6 +794,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.compile": _h_compile,
     "kb.summarize_session": _h_summarize_session,
     "kb.list_sessions": _h_list_sessions,
+    "kb.session_transcript": _h_session_transcript,
     "kb.propose_entity": _h_propose_entity,
     "kb.propose_relation": _h_propose_relation,
     "kb.propose_delete": _h_propose_delete,
