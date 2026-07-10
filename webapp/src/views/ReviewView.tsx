@@ -16,7 +16,6 @@ const STAGE_LABEL: Record<SessionEntry['stage'], string> = {
   pending: 'needs summary',
 }
 
-<<<<<<< HEAD
 /** Badge text for a row: summarized wins over the raw capture stage. */
 function stageLabel(s: SessionEntry): string {
   return s.summarized ? 'summarized' : STAGE_LABEL[s.stage]
@@ -54,7 +53,6 @@ export function ReviewView() {
   })
   useErrorToast(sessions.errors.length > 0, sessions.errors[0]?.error)
 
-<<<<<<< HEAD
   const rows: Row[] = sessions.rows.flatMap((r) =>
     (r.data?.sessions ?? []).map((s) => ({ project: r.project, s })),
   )
@@ -195,15 +193,11 @@ export function ReviewView() {
 
               <p className="mb-3 text-[15px] leading-6 text-ink">{rowTitle(selected.s)}</p>
 
-<<<<<<< HEAD
-              {canSummarize ? (
-=======
               {selected.s.summarized ? (
                 <p className="text-xs text-sepia">
                   Already summarized — its proposal is in Pending for review.
                 </p>
               ) : canSummarize ? (
->>>>>>> origin/test
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => summarize.mutate(selected)}
