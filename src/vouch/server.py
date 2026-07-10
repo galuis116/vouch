@@ -47,7 +47,7 @@ from .proposals import (
     reject_auto_extracted,
 )
 from .scoping import filter_hits, scoped_fetch_limit, viewer_from
-from .stats import collect_stats
+from .stats import collect_activity, collect_stats
 from .storage import (
     ArtifactNotFoundError,
     KBNotFoundError,
@@ -95,6 +95,32 @@ def kb_stats(*, days: int = 30) -> dict[str, Any]:
     """
     since = None if days == 0 else days
     return collect_stats(_store(), since_days=since)
+
+
+@mcp.tool()
+def kb_activity(
+    *,
+    days: int = 365,
+    tz_offset_minutes: int = 0,
+    tz: str | None = None,
+    project: str | None = None,
+    agent: str | None = None,
+) -> dict[str, Any]:
+    """Audit activity buckets for dashboards: per-day counts, hour-of-week
+    matrix, actor and event histograms. Scope-filtered like kb.audit.
+
+    days: window in local calendar days; 0 means all-time.
+    tz: IANA zone for local-time bucketing; falls back to tz_offset_minutes.
+    """
+    store = _store()
+    viewer = viewer_from(
+        config_path=store.config_path,
+        project=project,
+        agent=agent,
+    )
+    return collect_activity(
+        store, days=days, tz_offset_minutes=tz_offset_minutes, tz=tz, viewer=viewer,
+    )
 
 
 @mcp.tool()
@@ -554,6 +580,21 @@ def kb_list_sessions() -> dict[str, Any]:
     """
     from . import session_split
     return {"sessions": session_split.build_session_rows(_store())}
+
+
+@mcp.tool()
+def kb_session_transcript(session_id: str, agent: str | None = None) -> dict[str, Any]:
+    """Render a captured session's full transcript from its raw agent JSONL.
+
+    Read-only. Locates the raw Claude Code / Codex file on disk and normalizes
+    it into message blocks (text, thinking, tool_use with paired results).
+    ``agent`` restricts the search ("claude" | "codex"); omit to try both.
+    Degrades to compact capture observations when the raw file is unavailable.
+    """
+    from . import transcript
+    if agent is not None and agent not in ("claude", "codex"):
+        raise ValueError(f"unknown agent: {agent!r} (expected 'claude' or 'codex')")
+    return transcript.load_transcript(_store(), session_id, agent=agent)
 
 
 @mcp.tool()

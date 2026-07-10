@@ -55,7 +55,7 @@ from .proposals import (
     reject,
     reject_auto_extracted,
 )
-from .stats import collect_stats
+from .stats import collect_activity, collect_stats
 from .storage import (
     ArtifactNotFoundError,
     KBNotFoundError,
@@ -100,6 +100,20 @@ def _h_stats(p: dict) -> dict:
     days = int(p.get("days", 30))
     since = None if days == 0 else days
     return collect_stats(_store(), since_days=since)
+
+
+def _h_activity(p: dict) -> dict:
+    from .scoping import viewer_from_params
+
+    s = _store()
+    viewer = viewer_from_params(s, p)
+    return collect_activity(
+        s,
+        days=int(p.get("days", 365)),
+        tz_offset_minutes=int(p.get("tz_offset_minutes", 0)),
+        tz=p.get("tz"),
+        viewer=viewer,
+    )
 
 
 def _h_digest(p: dict) -> dict:
@@ -410,6 +424,15 @@ def _h_summarize_session(p: dict) -> dict:
 def _h_list_sessions(p: dict) -> dict:
     from . import session_split
     return {"sessions": session_split.build_session_rows(_store())}
+
+
+def _h_session_transcript(p: dict) -> dict:
+    from . import transcript
+    session_id = p["session_id"]
+    agent = p.get("agent")
+    if agent is not None and agent not in ("claude", "codex"):
+        raise ValueError(f"unknown agent: {agent!r} (expected 'claude' or 'codex')")
+    return transcript.load_transcript(_store(), session_id, agent=agent)
 
 
 def _h_propose_entity(p: dict) -> dict:
@@ -780,6 +803,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.capabilities": _h_capabilities,
     "kb.status": _h_status,
     "kb.stats": _h_stats,
+    "kb.activity": _h_activity,
     "kb.digest": _h_digest,
     "kb.search": _h_search,
     "kb.neighbors": _h_neighbors,
@@ -804,6 +828,7 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.compile": _h_compile,
     "kb.summarize_session": _h_summarize_session,
     "kb.list_sessions": _h_list_sessions,
+    "kb.session_transcript": _h_session_transcript,
     "kb.propose_entity": _h_propose_entity,
     "kb.propose_relation": _h_propose_relation,
     "kb.propose_delete": _h_propose_delete,
