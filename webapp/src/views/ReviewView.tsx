@@ -16,10 +16,10 @@ const STAGE_LABEL: Record<SessionEntry['stage'], string> = {
   pending: 'needs summary',
 }
 
-/** Badge text for a row. Summarized sessions are filtered out of the queue,
- *  so only the two live stages reach here. */
+<<<<<<< HEAD
+/** Badge text for a row: summarized wins over the raw capture stage. */
 function stageLabel(s: SessionEntry): string {
-  return STAGE_LABEL[s.stage]
+  return s.summarized ? 'summarized' : STAGE_LABEL[s.stage]
 }
 
 /** Hints for the skip reasons kb.summarize_session can return instead of a summary. */
@@ -54,19 +54,15 @@ export function ReviewView() {
   })
   useErrorToast(sessions.errors.length > 0, sessions.errors[0]?.error)
 
-  // Review is the "needs a summary" queue: a session drops off once it has been
-  // summarized — its summary proposal then lives in Pending. Filtering here also
-  // collapses the split fan-out: a split session files N summary proposals, each
-  // surfacing as a summarized row pointing at the same transcript; none of them
-  // belong in the queue.
+<<<<<<< HEAD
   const rows: Row[] = sessions.rows.flatMap((r) =>
-    (r.data?.sessions ?? [])
-      .filter((s) => !s.summarized)
-      .map((s) => ({ project: r.project, s })),
+    (r.data?.sessions ?? []).map((s) => ({ project: r.project, s })),
   )
   const selected = rows.find((r) => rowKey(r) === selectedKey) ?? null
   const canSummarize =
-    !!selected && hasMethod('kb.summarize_session', selected.project.conn.endpoint)
+    !!selected &&
+    !selected.s.summarized &&
+    hasMethod('kb.summarize_session', selected.project.conn.endpoint)
   const canTranscript =
     !!selected &&
     !!selected.s.session_id &&
@@ -122,8 +118,8 @@ export function ReviewView() {
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No sessions awaiting a summary"
-        hint="Captured sessions that still need a summary appear here to read and summarize. Once summarized, a session moves to Pending for review."
+        title="No captured sessions"
+        hint="Captured agent sessions appear here to read and summarize. A session that still needs a summary can be sent through review from its transcript."
       />
     )
   }
@@ -199,7 +195,15 @@ export function ReviewView() {
 
               <p className="mb-3 text-[15px] leading-6 text-ink">{rowTitle(selected.s)}</p>
 
+<<<<<<< HEAD
               {canSummarize ? (
+=======
+              {selected.s.summarized ? (
+                <p className="text-xs text-sepia">
+                  Already summarized — its proposal is in Pending for review.
+                </p>
+              ) : canSummarize ? (
+>>>>>>> origin/test
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => summarize.mutate(selected)}
