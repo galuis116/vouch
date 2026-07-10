@@ -205,3 +205,73 @@ def test_handler_returns_degraded_when_absent() -> None:
     })
     assert resp["ok"] is True
     assert resp["result"]["available"] is False
+
+
+# --- Task 9: Codex parser -------------------------------------------------
+
+_CODEX_LINES = [
+    {"type": "session_meta", "payload": {
+        "id": "cx-1", "cwd": "/repo", "timestamp": "2026-06-22T08:01:54Z",
+        "git": {"branch": "feat/x"}}},
+    {"type": "response_item", "payload": {
+        "type": "message", "role": "developer",
+        "content": [{"type": "input_text", "text": "<permissions>boilerplate"}]}},
+    {"type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "run the tests"}]}},
+    {"type": "response_item", "payload": {
+        "type": "reasoning", "encrypted_content": "gAAA...", "summary": []}},
+    {"type": "response_item", "payload": {
+        "type": "message", "role": "assistant",
+        "content": [{"type": "output_text", "text": "Running them now."}]}},
+    {"type": "response_item", "payload": {
+        "type": "function_call", "name": "exec_command",
+        "arguments": "{\"cmd\": \"pytest\"}", "call_id": "call_1"}},
+    {"type": "response_item", "payload": {
+        "type": "function_call_output", "call_id": "call_1", "output": "1 passed"}},
+    {"type": "response_item", "payload": {
+        "type": "custom_tool_call", "name": "apply_patch",
+        "input": "*** Begin Patch", "call_id": "call_2"}},
+    {"type": "response_item", "payload": {
+        "type": "custom_tool_call_output", "call_id": "call_2", "output": "Success"}},
+]
+
+
+def test_parse_codex_pairs_calls_and_skips_boilerplate(tmp_path: Path) -> None:
+    f = tmp_path / "rollout-x.jsonl"
+    _write_jsonl(f, _CODEX_LINES)
+    out = transcript.parse_codex_transcript(f)
+
+    assert out["session"]["agent"] == "codex"
+    assert out["session"]["cwd"] == "/repo"
+    assert out["session"]["git_branch"] == "feat/x"
+
+    roles = [m["role"] for m in out["messages"]]
+    assert roles == ["user", "assistant"]  # developer message skipped
+
+    assistant = out["messages"][1]
+    types = [b["type"] for b in assistant["blocks"]]
+    assert types == ["text", "tool_use", "tool_use"]  # reasoning (encrypted) skipped
+
+    exec_call = assistant["blocks"][1]
+    assert exec_call["name"] == "exec_command"
+    assert exec_call["result"]["content"] == "1 passed"
+    patch_call = assistant["blocks"][2]
+    assert patch_call["name"] == "apply_patch"
+    assert patch_call["result"]["content"] == "Success"
+
+
+def test_load_transcript_codex_source(
+    tmp_path: Path, store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No Claude file exists; a Codex rollout does -> load_transcript finds it.
+    codex_home = tmp_path / "codex"
+    sid = "019eec6b-4a0c-7ad0-afd1-68973c902231"
+    day = codex_home / "sessions" / "2026" / "06" / "22"
+    roll = day / f"rollout-2026-06-22T08-01-54-{sid}.jsonl"
+    _write_jsonl(roll, _CODEX_LINES)
+    monkeypatch.setenv("VOUCH_CLAUDE_PROJECTS_DIR", str(tmp_path / "no-claude"))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    out = transcript.load_transcript(store, sid)
+    assert out["available"] is True
+    assert out["source"]["agent"] == "codex"

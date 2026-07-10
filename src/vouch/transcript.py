@@ -235,8 +235,133 @@ def parse_claude_transcript(path: Path, *, max_messages: int = 2000) -> dict[str
     return {"session": session, "messages": messages, "truncated": truncated}
 
 
+def _codex_message_text(content: Any) -> str:
+    """Join a codex message's content parts (input_text / output_text / text)."""
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts = [
+        str(p.get("text", ""))
+        for p in content
+        if isinstance(p, dict) and p.get("type") in ("input_text", "output_text", "text")
+    ]
+    return "\n".join(x for x in parts if x).strip()
+
+
 def parse_codex_transcript(path: Path, *, max_messages: int = 2000) -> dict[str, Any]:
-    raise NotImplementedError("codex transcript parsing lands in Task 9")
+    """Parse a Codex rollout JSONL into the normalized transcript schema.
+
+    The canonical conversation is the sequence of ``response_item`` records:
+    ``message`` (role user/assistant; developer/system boilerplate skipped),
+    ``function_call`` / ``custom_tool_call`` and their ``*_output`` pairs, and
+    ``reasoning`` (encrypted, so dropped). Assistant activity between user
+    messages groups into one assistant message; an output pairs into its call
+    by ``call_id``. ``session_meta`` supplies cwd / branch / timestamps.
+    """
+    session: dict[str, Any] = {
+        "id": path.stem, "agent": "codex", "cwd": None, "git_branch": None,
+        "title": None, "started_at": None, "ended_at": None, "model": None,
+        "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0},
+    }
+    messages: list[dict[str, Any]] = []
+    tool_by_call: dict[str, dict[str, Any]] = {}
+    truncated = False
+    current: dict[str, Any] | None = None
+
+    def new_assistant() -> dict[str, Any]:
+        return {
+            "role": "assistant", "id": None, "model": None,
+            "timestamp": None, "tokens": None, "blocks": [],
+        }
+
+    def flush() -> None:
+        nonlocal current
+        if current is not None and current["blocks"]:
+            messages.append(current)
+        current = None
+
+    with path.open(encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                rec = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            payload = rec.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            rtype = rec.get("type")
+
+            if rtype == "session_meta":
+                sid = payload.get("id") or payload.get("session_id")
+                if isinstance(sid, str) and sid.strip():
+                    session["id"] = sid.strip()
+                if isinstance(payload.get("cwd"), str):
+                    session["cwd"] = payload["cwd"]
+                ts = payload.get("timestamp")
+                if isinstance(ts, str):
+                    session["started_at"] = ts
+                    session["ended_at"] = ts
+                git = payload.get("git")
+                if isinstance(git, dict) and isinstance(git.get("branch"), str):
+                    session["git_branch"] = git["branch"]
+                continue
+
+            if rtype != "response_item":
+                continue
+            if len(messages) >= max_messages:
+                truncated = True
+                break
+            ptype = payload.get("type")
+
+            if ptype == "message":
+                role = payload.get("role")
+                text = _codex_message_text(payload.get("content"))
+                if role == "user":
+                    flush()
+                    if text:
+                        messages.append({
+                            "role": "user", "id": None, "model": None,
+                            "timestamp": None, "tokens": None,
+                            "blocks": [{"type": "text", "text": text}],
+                        })
+                elif role == "assistant":
+                    if current is None:
+                        current = new_assistant()
+                    if text:
+                        current["blocks"].append({"type": "text", "text": text})
+                # developer / system messages are instruction boilerplate: skip.
+            elif ptype in ("function_call", "custom_tool_call"):
+                if current is None:
+                    current = new_assistant()
+                cid = payload.get("call_id")
+                if ptype == "function_call":
+                    tool_input: dict[str, Any] = {"arguments": payload.get("arguments")}
+                else:
+                    tool_input = {"input": payload.get("input")}
+                block: dict[str, Any] = {
+                    "type": "tool_use", "id": cid,
+                    "name": str(payload.get("name", "")),
+                    "input": tool_input, "result": None,
+                }
+                current["blocks"].append(block)
+                if isinstance(cid, str):
+                    tool_by_call[cid] = block
+            elif ptype in ("function_call_output", "custom_tool_call_output"):
+                cid = payload.get("call_id")
+                paired = tool_by_call.get(cid) if isinstance(cid, str) else None
+                if paired is not None:
+                    paired["result"] = {
+                        "content": str(payload.get("output", "")),
+                        "is_error": False, "subagent_session_id": None,
+                    }
+    flush()
+    return {"session": session, "messages": messages, "truncated": truncated}
 
 
 def _degraded(store: KBStore, session_id: str, reason: str) -> dict[str, Any]:
