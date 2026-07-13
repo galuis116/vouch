@@ -6,6 +6,13 @@ All notable changes to vouch are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- `lifecycle.contradict()` no longer lets a claim contradict itself. calling
+  it with the same claim id on both sides previously wrote a self-loop
+  `contradicts` reference and flipped the claim to `contested` with no
+  actual counterparty; it now raises `LifecycleError`, mirroring the
+  existing guard in `supersede()`.
+
 ### Added
 - `kb.list_skills` / `kb.get_skill` — agents can enumerate the Claude Code
   slash-command and `SKILL.md` catalogue visible at `<kb_root>/.claude/` and
