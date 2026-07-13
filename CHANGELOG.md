@@ -6,6 +6,42 @@ All notable changes to vouch are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- cli mirrors for the last five `kb.*` methods that had none —
+  `vouch propose-delete`, `vouch source list`, `vouch session list`,
+  `vouch session transcript`, `vouch session summarize` — and the
+  capabilities test now enforces cli parity alongside the existing
+  jsonl + mcp checks, so a new method cannot land without its cli
+  command (#475).
+- `retrieval.recency`: a half-life decay (default 90 days, whole-day
+  quantized) blended into fused context-pack scores so fresher knowledge
+  outranks equally-relevant stale knowledge. rescoring-only — an old
+  artifact loses at most half its score and never vanishes. enabled in
+  the starter config for new kbs; existing kbs keep byte-identical
+  ordering until they add the key (#476).
+- a `retrieval` block on `kb.search` and `kb.context` responses reports
+  the configured vs actually-used backend, whether semantic search is
+  available, and a `degraded` flag — a base install serving lexical hits
+  under a semantic-capable backend name now says so instead of labelling
+  them "hybrid" (#476).
+
+### Changed
+- `kb.search` is one implementation (`context.search_kb`) across mcp and
+  jsonl instead of three drifting copies; `auto` now fuses embedding +
+  fts5 via rrf with a substring fallback (it used to waterfall
+  embedding-first), and an omitted backend defers to `retrieval.backend`
+  in config.yaml (#476).
+
+### Fixed
+- approve/reject/expire record the audit event *before* moving the
+  proposal to decided/. a crash between the two used to leave a durable
+  decision with no authoritative history; it now leaves a pending
+  proposal with its decision event, which the approve retry path already
+  guards (#475).
+- demo image build: `hatch_build.py` (the build hook pyproject.toml
+  declares for console bundling) is copied into the docker build context;
+  the image had been unbuildable since the hook landed (#474).
+
 ## [1.3.0] — 2026-07-14
 
 ### Added
