@@ -733,13 +733,11 @@ def _h_import_check(p: dict) -> dict:
             "identical_files": len(r.identical), "issues": r.issues}
 
 
-def _h_import_apply(p: dict) -> dict:
-    r = bundle.import_apply(
-        _store().kb_dir, Path(p["bundle_path"]),
-        on_conflict=p.get("on_conflict", "skip"), actor=_agent(),
-    )
-    health.rebuild_index(_store())
-    return r
+# kb.import_apply is deliberately NOT an agent-facing handler: it writes bundle
+# members (claims/pages/decided) straight to disk, a parallel path past
+# proposals.approve(). It survives only as the human `vouch import apply` CLI
+# command until gated import lands (roadmap 8.2). kb.import_check (read-only)
+# stays available to agents.
 
 
 def _h_audit(p: dict) -> dict:
@@ -948,7 +946,6 @@ HANDLERS: dict[str, Callable[[dict], Any]] = {
     "kb.export": _h_export,
     "kb.export_check": _h_export_check,
     "kb.import_check": _h_import_check,
-    "kb.import_apply": _h_import_apply,
     "kb.audit": _h_audit,
     "kb.reindex_embeddings": _h_reindex_embeddings,
     "kb.dedup_scan": _h_dedup_scan,

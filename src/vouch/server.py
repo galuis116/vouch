@@ -1064,17 +1064,10 @@ def kb_import_check(bundle_path: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
-def kb_import_apply(bundle_path: str, on_conflict: str = "skip") -> dict[str, Any]:
-    try:
-        r = bundle.import_apply(
-            _store().kb_dir, Path(bundle_path),
-            on_conflict=on_conflict, actor=_agent(),
-        )
-    except (RuntimeError, ValueError) as e:
-        raise ValueError(str(e)) from e
-    health.rebuild_index(_store())
-    return r
+# kb_import_apply is intentionally not exposed as an MCP tool: applying a bundle
+# writes members (claims/pages/decided) straight to disk, bypassing
+# proposals.approve(). It remains the human-only `vouch import apply` CLI command
+# until gated import lands (roadmap 8.2). kb_import_check (read-only) stays.
 
 
 @mcp.tool()
