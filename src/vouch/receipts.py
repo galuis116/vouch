@@ -73,6 +73,53 @@ def verify_receipt(evidence: Evidence, source_bytes: bytes) -> ReceiptResult:
     return ReceiptResult(ReceiptStatus.VERIFIED)
 
 
+def locate_span(source_bytes: bytes, quote: str) -> tuple[int, int] | None:
+    """Byte offsets of the first exact occurrence of ``quote``, or None.
+
+    The quote step of the retrieve-then-quote loop: a claim earns a receipt
+    only if its quoted text appears verbatim in the source's raw bytes. The
+    match is exact and case-sensitive by design — no normalization, no fuzzy
+    match — because the receipt's whole value is that it is checkable by
+    ``==``. A paraphrase does not appear verbatim, so it returns None and the
+    caller drops the claim. Returns the first occurrence for determinism.
+    """
+    needle = quote.encode("utf-8")
+    if not needle:
+        return None
+    idx = source_bytes.find(needle)
+    if idx < 0:
+        return None
+    return (idx, idx + len(needle))
+
+
+def receipt_for_quote(
+    *,
+    source_id: str,
+    source_bytes: bytes,
+    quote: str,
+    evidence_id: str,
+) -> Evidence | None:
+    """Build an ``Evidence`` carrying a verifying receipt, or None to drop.
+
+    Locates ``quote`` in ``source_bytes`` and, if found, returns an Evidence
+    whose byte-offset receipt is guaranteed to verify against those same bytes.
+    Returns None when the quote is not present verbatim — the mechanical form
+    of "drops any claim it cannot quote."
+    """
+    span = locate_span(source_bytes, quote)
+    if span is None:
+        return None
+    start, end = span
+    return Evidence(
+        id=evidence_id,
+        source_id=source_id,
+        locator=f"b{start}-{end}",
+        quote=quote,
+        byte_start=start,
+        byte_end=end,
+    )
+
+
 def verify_evidence(store: KBStore, evidence: Evidence) -> ReceiptResult:
     """Verify ``evidence``'s receipt against its source's stored bytes.
 

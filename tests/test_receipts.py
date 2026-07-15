@@ -12,7 +12,13 @@ from __future__ import annotations
 import pytest
 
 from vouch.models import Evidence
-from vouch.receipts import ReceiptStatus, verify_evidence, verify_receipt
+from vouch.receipts import (
+    ReceiptStatus,
+    locate_span,
+    receipt_for_quote,
+    verify_evidence,
+    verify_receipt,
+)
 from vouch.storage import KBStore
 
 
@@ -151,3 +157,49 @@ def test_verify_evidence_not_verified_when_source_missing(store: KBStore) -> Non
     )
     result = verify_evidence(store, ev)
     assert result.verified is False
+
+
+# ---- the quote step: locate a span, or drop what cannot be quoted ----
+
+
+def test_locate_span_returns_byte_offsets_of_exact_occurrence() -> None:
+    assert locate_span(SOURCE, "quick brown") == (4, 15)
+
+
+def test_locate_span_returns_none_when_quote_absent() -> None:
+    # the drop trigger: a claim that cannot quote its source
+    assert locate_span(SOURCE, "slow green turtle") is None
+
+
+def test_locate_span_returns_none_for_empty_quote() -> None:
+    assert locate_span(SOURCE, "") is None
+
+
+def test_locate_span_finds_first_occurrence() -> None:
+    src = b"ab ab ab"
+    assert locate_span(src, "ab") == (0, 2)
+
+
+def test_locate_span_uses_byte_offsets_for_multibyte_source() -> None:
+    source = "café — au lait".encode()
+    start, end = locate_span(source, "au lait")  # type: ignore[misc]
+    assert (start, end) == (10, 17)
+    assert source[start:end].decode() == "au lait"
+
+
+def test_receipt_for_quote_produces_a_verifying_receipt() -> None:
+    # the invariant that ties the two halves together: anything the locator
+    # produces must verify against the same bytes.
+    ev = receipt_for_quote(
+        source_id="s1", source_bytes=SOURCE, quote="lazy dog", evidence_id="e9"
+    )
+    assert ev is not None
+    assert ev.quote == "lazy dog"
+    assert verify_receipt(ev, SOURCE).status is ReceiptStatus.VERIFIED
+
+
+def test_receipt_for_quote_drops_unquotable_claim() -> None:
+    ev = receipt_for_quote(
+        source_id="s1", source_bytes=SOURCE, quote="not in here", evidence_id="e9"
+    )
+    assert ev is None
