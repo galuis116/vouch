@@ -365,3 +365,19 @@ def test_mcp_agent_falls_back_to_env_when_unauthenticated(monkeypatch) -> None:
     monkeypatch.setenv("VOUCH_AGENT", "env-agent")
     with trust_mod.trust_context(trust_mod.MCP_STDIO):  # no auth_subject
         assert vouch_server._agent() == "env-agent"
+
+
+def test_mcp_export_fenced_to_root_on_remote(tmp_path, monkeypatch) -> None:
+    """The /mcp export tool cannot clobber a file outside the project root."""
+    from vouch import server as vouch_server
+    from vouch import trust as trust_mod
+
+    store = KBStore.init(tmp_path)
+    monkeypatch.chdir(store.root)
+    tool = vouch_server.mcp._tool_manager.get_tool("kb_export")
+    assert tool is not None
+    with trust_mod.trust_context(trust_mod.MCP_HTTP), pytest.raises(
+        ValueError, match="project root"
+    ):
+        tool.fn(out_path="../escaped.tar.gz")
+    assert not (store.root.parent / "escaped.tar.gz").exists()

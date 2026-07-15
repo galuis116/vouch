@@ -1037,7 +1037,9 @@ def kb_doctor() -> dict[str, Any]:
 
 @mcp.tool()
 def kb_export(out_path: str) -> dict[str, Any]:
-    manifest = bundle.export(_store().kb_dir, dest=Path(out_path), actor=_agent())
+    s = _store()
+    dest = bundle.fenced_bundle_path(s, out_path)
+    manifest = bundle.export(s.kb_dir, dest=dest, actor=_agent())
     return {
         "bundle_id": manifest["bundle_id"],
         "files": len(manifest["files"]),
@@ -1047,7 +1049,8 @@ def kb_export(out_path: str) -> dict[str, Any]:
 
 @mcp.tool()
 def kb_export_check(bundle_path: str) -> dict[str, Any]:
-    r = bundle.export_check(Path(bundle_path))
+    s = _store()
+    r = bundle.export_check(bundle.fenced_bundle_path(s, bundle_path))
     return {
         "ok": r.ok, "bundle_id": r.bundle_id,
         "files_checked": r.files_checked, "issues": r.issues,
@@ -1056,7 +1059,8 @@ def kb_export_check(bundle_path: str) -> dict[str, Any]:
 
 @mcp.tool()
 def kb_import_check(bundle_path: str) -> dict[str, Any]:
-    r = bundle.import_check(_store().kb_dir, Path(bundle_path))
+    s = _store()
+    r = bundle.import_check(s.kb_dir, bundle.fenced_bundle_path(s, bundle_path))
     return {
         "ok": r.ok, "bundle_id": r.bundle_id,
         "new_files": r.new_files, "conflicts": r.conflicts,
@@ -1119,7 +1123,6 @@ def kb_dedup_scan(
 @mcp.tool()
 def kb_eval_embeddings(*, queries_path: str, k: int = 10) -> dict[str, Any]:
     """Run retrieval eval over a JSONL queries file."""
-    from pathlib import Path
 
     from .embeddings.scorer import evaluate
     store = _store()

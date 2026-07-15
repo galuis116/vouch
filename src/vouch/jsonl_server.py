@@ -714,20 +714,23 @@ def _h_doctor(_: dict) -> dict:
 
 
 def _h_export(p: dict) -> dict:
-    manifest = bundle.export(_store().kb_dir, dest=Path(p["out_path"]),
-                             actor=_agent())
+    s = _store()
+    dest = bundle.fenced_bundle_path(s, p["out_path"])
+    manifest = bundle.export(s.kb_dir, dest=dest, actor=_agent())
     return {"bundle_id": manifest["bundle_id"],
             "files": len(manifest["files"]), "out": p["out_path"]}
 
 
 def _h_export_check(p: dict) -> dict:
-    r = bundle.export_check(Path(p["bundle_path"]))
+    s = _store()
+    r = bundle.export_check(bundle.fenced_bundle_path(s, p["bundle_path"]))
     return {"ok": r.ok, "bundle_id": r.bundle_id,
             "files_checked": r.files_checked, "issues": r.issues}
 
 
 def _h_import_check(p: dict) -> dict:
-    r = bundle.import_check(_store().kb_dir, Path(p["bundle_path"]))
+    s = _store()
+    r = bundle.import_check(s.kb_dir, bundle.fenced_bundle_path(s, p["bundle_path"]))
     return {"ok": r.ok, "bundle_id": r.bundle_id,
             "new_files": r.new_files, "conflicts": r.conflicts,
             "identical_files": len(r.identical), "issues": r.issues}
@@ -771,7 +774,6 @@ def _h_dedup_scan(p: dict) -> dict:
 
 
 def _h_eval_embeddings(p: dict) -> dict:
-    from pathlib import Path
 
     from .embeddings.scorer import evaluate
     return evaluate(

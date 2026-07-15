@@ -317,3 +317,39 @@ def test_one_token_cannot_self_approve_by_swapping_header(
             jsonl_server._actor.reset(reset)
     assert not resp["ok"]
     assert "forbidden_self_approval" in resp["error"]["message"]
+
+
+def test_export_out_path_fenced_to_root_on_remote(store: KBStore, monkeypatch) -> None:
+    """A remote caller cannot make kb.export clobber a file outside the root."""
+    from vouch import trust as trust_mod
+
+    monkeypatch.chdir(store.root)
+    with trust_mod.trust_context(trust_mod.JSONL_HTTP):
+        resp = handle_request({"id": "1", "method": "kb.export",
+                               "params": {"out_path": "../escaped.tar.gz"}})
+    assert not resp["ok"]
+    assert "project root" in resp["error"]["message"]
+    assert not (store.root.parent / "escaped.tar.gz").exists()
+
+
+def test_export_within_root_still_works_on_remote(store: KBStore, monkeypatch) -> None:
+    from vouch import trust as trust_mod
+
+    monkeypatch.chdir(store.root)
+    with trust_mod.trust_context(trust_mod.JSONL_HTTP):
+        resp = handle_request({"id": "1", "method": "kb.export",
+                               "params": {"out_path": "bundle.tar.gz"}})
+    assert resp["ok"]
+    assert (store.root / "bundle.tar.gz").exists()
+
+
+def test_import_check_bundle_path_fenced_on_remote(store: KBStore, monkeypatch) -> None:
+    """A remote caller cannot point kb.import_check at an arbitrary file."""
+    from vouch import trust as trust_mod
+
+    monkeypatch.chdir(store.root)
+    with trust_mod.trust_context(trust_mod.JSONL_HTTP):
+        resp = handle_request({"id": "1", "method": "kb.import_check",
+                               "params": {"bundle_path": "/etc/passwd"}})
+    assert not resp["ok"]
+    assert "project root" in resp["error"]["message"]

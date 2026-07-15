@@ -29,7 +29,7 @@ import yaml
 
 from . import audit
 from .models import Claim, Entity, Evidence, Proposal, Relation, Session, Source
-from .storage import _deserialize_page, sha256_hex
+from .storage import KBStore, _deserialize_page, sha256_hex
 
 MANIFEST_NAME = "manifest.json"
 SPEC_VERSION = "vouch-bundle-0.1"
@@ -113,6 +113,23 @@ def build_manifest(kb_dir: Path) -> dict[str, Any]:
             "has_audit_log": False,
         },
     }
+
+
+def fenced_bundle_path(store: KBStore, raw: str) -> Path:
+    """A client-supplied bundle/export path, confined to the project root on
+    remote surfaces.
+
+    Export writes to the path and import reads from it, so an unfenced path on
+    /rpc or /mcp is a remote arbitrary-file clobber (export) or read (import).
+    On remote trust the path is resolved and contained to the project root;
+    local CLI and stdio are unfenced by design, since a human choosing where to
+    write a backup is not a threat.
+    """
+    from . import trust
+
+    if trust.current().remote:
+        return store.resolve_under_root(raw)
+    return Path(raw)
 
 
 def export(kb_dir: Path, *, dest: Path, actor: str = "vouch-export") -> dict[str, Any]:
