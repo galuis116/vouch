@@ -14,6 +14,7 @@ import pytest
 from vouch.models import Evidence
 from vouch.receipts import (
     ReceiptStatus,
+    evaluate_claim_receipts,
     locate_span,
     receipt_for_quote,
     verify_evidence,
@@ -215,3 +216,47 @@ def test_receipt_for_quote_mints_deterministic_id_by_default() -> None:
     assert a is not None and b is not None and c is not None
     assert a.id == b.id
     assert c.id != a.id
+
+
+# ---- the claim-level verdict: the input to phase d's mechanical gate ----
+
+
+def _quoted_evidence(store: KBStore, source_id: str, quote: str) -> str:
+    ev = receipt_for_quote(source_id=source_id, source_bytes=SOURCE, quote=quote)
+    assert ev is not None
+    store.put_evidence(ev)
+    return ev.id
+
+
+def test_claim_verdict_approves_when_every_citation_verifies(store: KBStore) -> None:
+    src = store.put_source(SOURCE, title="t")
+    e1 = _quoted_evidence(store, src.id, "quick brown")
+    e2 = _quoted_evidence(store, src.id, "lazy dog")
+    verdict = evaluate_claim_receipts(store, [e1, e2])
+    assert verdict.approve is True
+
+
+def test_claim_verdict_rejects_when_any_citation_is_forged(store: KBStore) -> None:
+    src = store.put_source(SOURCE, title="t")
+    good = _quoted_evidence(store, src.id, "quick brown")
+    forged = store.put_evidence(
+        Evidence(id="forged", source_id=src.id, locator="x",
+                 quote="not in source", byte_start=0, byte_end=5)
+    )
+    verdict = evaluate_claim_receipts(store, [good, forged.id])
+    assert verdict.approve is False
+    assert any("forged" in r for r in verdict.reasons)
+
+
+def test_claim_verdict_rejects_bare_source_citation_as_no_receipt(
+    store: KBStore,
+) -> None:
+    # citing a source id directly carries no byte-offset receipt -> reject
+    src = store.put_source(SOURCE, title="t")
+    verdict = evaluate_claim_receipts(store, [src.id])
+    assert verdict.approve is False
+
+
+def test_claim_verdict_rejects_empty_citation_list(store: KBStore) -> None:
+    verdict = evaluate_claim_receipts(store, [])
+    assert verdict.approve is False

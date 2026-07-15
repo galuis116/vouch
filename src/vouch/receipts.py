@@ -133,6 +133,47 @@ def receipt_for_quote(
     )
 
 
+@dataclass(frozen=True)
+class ClaimReceiptVerdict:
+    """Whether a claim's citations clear the mechanical gate.
+
+    ``approve`` is True only when the claim cites at least one thing and every
+    citation is a receipt that VERIFIES. This is the input to phase d's gate:
+    receipt verifies -> auto-approve; anything else -> reject, with ``reasons``
+    naming each citation that failed and why.
+    """
+
+    approve: bool
+    reasons: tuple[str, ...] = ()
+
+
+def evaluate_claim_receipts(
+    store: KBStore, evidence_ids: list[str]
+) -> ClaimReceiptVerdict:
+    """Verdict on a claim's citations for the mechanical gate.
+
+    Each citation must resolve to an Evidence whose receipt verifies. A bare
+    source id (or unknown id) carries no byte-offset receipt and is rejected as
+    such; a claim that cites nothing is rejected. No LLM, no judge — the verdict
+    is the conjunction of per-citation string comparisons.
+    """
+    from .storage import ArtifactNotFoundError
+
+    if not evidence_ids:
+        return ClaimReceiptVerdict(False, ("claim cites nothing",))
+    reasons: list[str] = []
+    for eid in evidence_ids:
+        try:
+            evidence = store.get_evidence(eid)
+        except ArtifactNotFoundError:
+            reasons.append(f"{eid}: no receipt (bare source or unknown id)")
+            continue
+        result = verify_evidence(store, evidence)
+        if result.status is not ReceiptStatus.VERIFIED:
+            reasons.append(f"{eid}: {result.status.value}")
+    return ClaimReceiptVerdict(not reasons, tuple(reasons))
+
+
 def verify_evidence(store: KBStore, evidence: Evidence) -> ReceiptResult:
     """Verify ``evidence``'s receipt against its source's stored bytes.
 
