@@ -6,11 +6,17 @@
 # what it does:
 #   - creates the auto-merge / ci: passing / ci: failing labels
 #   - enables the repo "allow auto-merge" setting (so `gh pr merge --auto` works)
-#   - protects <branch>: required checks (ci matrix + trust-gate + claude-verify),
-#     require code-owner review (this is what keeps core changes owner-gated)
+#   - protects <branch>: required checks (ci matrix + trust-gate) and code-owner
+#     review (this is what keeps core changes owner-gated).
+#
+# note: claude-verify is deliberately NOT a required status check. it only runs
+# on auto-merge-labeled prs, so requiring it globally would block every normal
+# (unlabeled) pr from merging. the label flow still gates on it via the job
+# dependency in auto-merge.yml (arm needs a green verify job), so claude's veto
+# holds without blocking manual merges.
 #
 # confirm the required-check names still match .github/workflows/ci.yml's job
-# names before relying on it (see the CONTEXTS block below).
+# names before relying on it (see the contexts block below).
 set -euo pipefail
 
 REPO="${REPO:-vouchdev/vouch}"
@@ -35,8 +41,7 @@ gh api --method PUT "repos/$REPO/branches/$BRANCH/protection" --input - <<'JSON'
       "test (py3.12)",
       "test (py3.13)",
       "build sdist + wheel",
-      "trust-gate",
-      "claude-verify"
+      "trust-gate"
     ]
   },
   "enforce_admins": false,
