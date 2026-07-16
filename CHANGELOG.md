@@ -6,6 +6,12 @@ All notable changes to vouch are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- `compile_kb()` no longer lets two same-titled drafts in one LLM response
+  both survive the collision guard — the second draft is now dropped instead
+  of silently overwriting the first-approved page via the PAGE `update_page`
+  fallback in `approve()`. (#439)
+
 ## [1.2.2] — 2026-07-07
 
 ### Packaging

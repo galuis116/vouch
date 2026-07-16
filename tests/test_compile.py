@@ -317,6 +317,26 @@ def test_collision_with_pending_proposal_dropped(
     assert "pending review" in second.dropped[0]["reason"]
 
 
+def test_collision_within_same_batch_second_draft_dropped(
+    store: KBStore, tmp_path: Path,
+) -> None:
+    """two drafts in one LLM response with the same title must not both
+    survive validation — approving both would silently overwrite the first
+    page via the PAGE update_page fallback in approve()."""
+    c1 = _approved_claim(store, "a fact")
+    report = compile_kb(store, config=_cfg(_stub_llm(tmp_path, [
+        {"title": "Deploy Workflow", "type": "workflow",
+         "body": f"first body [claim: {c1}]", "claims": [c1]},
+        {"title": "Deploy Workflow", "type": "workflow",
+         "body": f"SECOND BODY totally different [claim: {c1}]", "claims": [c1]},
+    ])))
+    assert len(report.proposed) == 1
+    assert "already exists" in report.dropped[0]["reason"]
+
+    approve(store, report.proposed[0]["proposal_id"], approved_by="human-B")
+    assert store.get_page("deploy-workflow").body == f"first body [claim: {c1}]"
+
+
 def test_dropped_sibling_dangles_wikilink_and_cascades(
     store: KBStore, tmp_path: Path,
 ) -> None:
