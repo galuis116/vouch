@@ -8,12 +8,15 @@ permissions:
   checks: write
 jobs:
   guard:
-    # entry only when the auto-merge label is present AND the PR is authored by
-    # the owner (trusted). belt-and-suspenders sender check in the step below.
+    # trigger on the auto-merge label (just added, or already present on a
+    # re-push). the label can only be applied by a maintainer — contributors
+    # lack the permission — and the step below pins the labeler to the trusted
+    # owner and strips the label if anyone else applies it, so that step is the
+    # real authorization gate. this lets the owner authorize a CONTRIBUTOR's PR
+    # by labeling it, not just their own PRs.
     if: >
-      github.event.pull_request.author_association == 'OWNER' &&
-      (github.event.label.name == 'auto-merge' ||
-       contains(github.event.pull_request.labels.*.name, 'auto-merge'))
+      github.event.label.name == 'auto-merge' ||
+      contains(github.event.pull_request.labels.*.name, 'auto-merge')
     runs-on: ubuntu-latest
     outputs:
       klass: ${{ steps.classify.outputs.klass }}
@@ -25,13 +28,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: the labeler must be trusted (defense in depth)
+      - name: the labeler must be trusted (primary authorization gate)
         if: github.event.action == 'labeled'
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
           SENDER: ${{ github.event.sender.login }}
         run: |
-          test "$SENDER" = "plind-junior" || {
-            echo "::error::auto-merge label applied by an untrusted actor"; exit 1; }
+          if [ "$SENDER" != "plind-junior" ]; then
+            echo "::error::auto-merge label applied by an untrusted actor ($SENDER)"
+            # strip it so an untrusted label can't persist and bypass this check
+            # on a later synchronize (push) event.
+            gh pr edit "$PR" --repo "$REPO" --remove-label auto-merge || true
+            exit 1
+          fi
       - name: classify
         id: classify
         env:
