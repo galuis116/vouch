@@ -168,9 +168,9 @@ def _read_lines(path: str) -> list[str]:
 
 
 def extract_changed_paths(files_json: str) -> list[str]:
-    """Flatten a REST ``/pulls/{n}/files`` payload into a path list.
+    """flatten a REST ``/pulls/{n}/files`` payload into a path list.
 
-    Emits both ``filename`` and, for a renamed entry, ``previous_filename`` —
+    emits both ``filename`` and, for a renamed entry, ``previous_filename`` —
     a rename that lands a core path under a new name must still classify as
     core. ``gh pr view --json files`` (the GraphQL-backed shortcut) carries no
     previous-filename field and silently drops this; callers must use the
