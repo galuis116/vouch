@@ -8,6 +8,7 @@ import pytest
 
 from vouch import health, index_db
 from vouch.models import Claim, ClaimStatus, Proposal, ProposalKind, ProposalStatus
+from vouch.proposals import approve, propose_claim, propose_delete
 from vouch.storage import KBStore, _yaml_dump
 
 
@@ -313,6 +314,55 @@ def test_fsck_decided_missing_artifact(store: KBStore) -> None:
     report = health.fsck(store)
     codes = {f.code for f in report.findings}
     assert "decided_missing_artifact" in codes
+
+
+def test_fsck_survives_approved_delete_proposal(store: KBStore) -> None:
+    """An approved delete proposal must not crash fsck, and the artifact it
+    correctly removed must not be flagged as a missing create-time artifact."""
+    src = store.put_source(b"evidence")
+    pr = propose_claim(store, text="a fact", evidence=[src.id], proposed_by="agent-a")
+    claim = approve(store, pr.id, approved_by="human-b")
+
+    del_pr = propose_delete(
+        store, target_kind="claim", target_id=claim.id, proposed_by="agent-a",
+    )
+    approve(store, del_pr.id, approved_by="human-c")
+
+    report = health.fsck(store)
+    assert report.findings == []
+
+
+def test_fsck_flags_delete_whose_artifact_still_exists(store: KBStore) -> None:
+    """A delete proposal is approved, but the artifact it claims to have
+    removed is still on disk — the delete never actually took effect."""
+    src = store.put_source(b"evidence")
+    claim = Claim(id="still-here", text="t", evidence=[src.id])
+    store.put_claim(claim)
+    store.put_proposal(Proposal(
+        id="del-1",
+        kind=ProposalKind.DELETE,
+        proposed_by="agent",
+        payload={"target_kind": "claim", "id": "still-here", "snapshot": {}},
+        status=ProposalStatus.APPROVED,
+    ))
+
+    report = health.fsck(store)
+    codes = {f.code for f in report.findings}
+    assert "decided_delete_artifact_present" in codes
+
+
+def test_fsck_flags_delete_with_invalid_target_kind(store: KBStore) -> None:
+    store.put_proposal(Proposal(
+        id="del-2",
+        kind=ProposalKind.DELETE,
+        proposed_by="agent",
+        payload={"target_kind": "not-a-real-kind", "id": "whatever", "snapshot": {}},
+        status=ProposalStatus.APPROVED,
+    ))
+
+    report = health.fsck(store)
+    codes = {f.code for f in report.findings}
+    assert "decided_delete_invalid_target_kind" in codes
 
 
 def test_fsck_index_orphan_row(store: KBStore) -> None:

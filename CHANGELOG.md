@@ -45,6 +45,18 @@ All notable changes to vouch are documented here. Format follows
   artifact the caller could not already retrieve, and it touches no write path.
 
 ### Fixed
+- **`vouch fsck` no longer crashes on an approved delete proposal** (#538
+  reopened, root-caused): `_check_decided_proposals` indexed a `presence`
+  dict by every approved proposal's own kind, but the dict has no entry
+  for `ProposalKind.DELETE` — so any KB that had ever had a delete
+  approved crashed `fsck()` with an uncaught `KeyError`. Delete proposals
+  are now checked in a first pass against their `target_kind` (reporting
+  `decided_delete_invalid_target_kind` for a missing/unrecognized one, or
+  `decided_delete_artifact_present` if the target wasn't actually
+  removed), and the artifact ids they legitimately deleted are excluded
+  from the second pass so the *original* creating proposal doesn't
+  false-positive as `decided_missing_artifact` once its artifact is
+  correctly gone.
 - **`hub_client` ETag lookup is now case-insensitive** (#662): `_request`
   flattened `resp.headers` (case-insensitive by design) into a plain
   `dict`, so `pull()`'s `resp_headers.get("ETag")` silently returned

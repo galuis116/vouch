@@ -473,7 +473,10 @@ def _check_decided_proposals(
 
     A crash between `put_<kind>()` and `move_proposal_to_decided()` would
     leave a `decided/` entry without a matching artifact (or vice versa);
-    surface the artifact-missing case so an operator can investigate.
+    surface the artifact-missing case so an operator can investigate. A
+    ``DELETE`` proposal is the inverse: approving it removes the artifact,
+    so its target must be *absent*, checked against ``target_kind`` (the
+    kind of what was deleted) rather than ``pr.kind`` (always ``DELETE``).
     """
     relations = {r.id for r in store.list_relations()}
     presence: dict[ProposalKind, set[str]] = {
@@ -482,7 +485,54 @@ def _check_decided_proposals(
         ProposalKind.ENTITY: set(entities),
         ProposalKind.RELATION: relations,
     }
-    for pr in store.list_proposals(ProposalStatus.APPROVED):
+    approved = list(store.list_proposals(ProposalStatus.APPROVED))
+
+    # First pass: an approved DELETE proposal's target is expected to be
+    # absent. Collect what it legitimately removed so the second pass
+    # (which checks that a create/edit proposal's artifact still exists)
+    # doesn't flag the artifact its own delete proposal correctly removed.
+    deleted: dict[ProposalKind, set[str]] = {k: set() for k in presence}
+    for pr in approved:
+        if pr.kind is not ProposalKind.DELETE:
+            continue
+        artifact_id = pr.payload.get("id") if isinstance(pr.payload, dict) else None
+        if not artifact_id:
+            continue
+        target_kind_str = (
+            pr.payload.get("target_kind") if isinstance(pr.payload, dict) else None
+        )
+        try:
+            target_kind = ProposalKind(target_kind_str) if target_kind_str else None
+        except ValueError:
+            target_kind = None
+        if target_kind is None or target_kind not in presence:
+            findings.append(
+                Finding(
+                    "error",
+                    "decided_delete_invalid_target_kind",
+                    f"approved delete proposal {pr.id} has an invalid or "
+                    f"missing target_kind {target_kind_str!r}",
+                    [pr.id],
+                )
+            )
+            continue
+        if artifact_id in presence[target_kind]:
+            findings.append(
+                Finding(
+                    "error",
+                    "decided_delete_artifact_present",
+                    f"approved delete proposal {pr.id} targeted "
+                    f"{target_kind.value} {artifact_id}, but the artifact "
+                    f"still exists on disk",
+                    [pr.id, artifact_id],
+                )
+            )
+        else:
+            deleted[target_kind].add(artifact_id)
+
+    for pr in approved:
+        if pr.kind is ProposalKind.DELETE:
+            continue
         artifact_id = pr.payload.get("id") if isinstance(pr.payload, dict) else None
         if not artifact_id:
             findings.append(
@@ -494,6 +544,8 @@ def _check_decided_proposals(
                 )
             )
             continue
+        if artifact_id in deleted[pr.kind]:
+            continue  # removed by a later, separately-verified delete proposal
         if artifact_id not in presence[pr.kind]:
             findings.append(
                 Finding(
