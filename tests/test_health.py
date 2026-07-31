@@ -8,7 +8,7 @@ import pytest
 
 from vouch import health, index_db
 from vouch.models import Claim, ClaimStatus, Proposal, ProposalKind, ProposalStatus
-from vouch.proposals import approve, propose_claim, propose_delete
+from vouch.proposals import approve, propose_claim, propose_delete, propose_goal
 from vouch.storage import KBStore, _yaml_dump
 
 
@@ -379,6 +379,37 @@ def test_fsck_flags_delete_proposal_with_no_artifact_id(store: KBStore) -> None:
     report = health.fsck(store)
     codes = {f.code for f in report.findings}
     assert "decided_no_artifact_id" in codes
+
+
+def test_fsck_survives_approved_goal_proposal(store: KBStore) -> None:
+    """An approved GOAL proposal must not crash fsck. `_check_decided_
+    proposals`' presence map previously covered only CLAIM/PAGE/ENTITY/
+    RELATION, so an approved goal fell through to `presence[pr.kind]` (or,
+    with only the DELETE fix applied, the sibling `deleted[pr.kind]` two
+    lines earlier) and raised KeyError - the exact crash `fsck` is meant to
+    survive, just for a different kind."""
+    pr = propose_goal(store, title="ship the thing", proposed_by="agent")
+    approve(store, pr.id, approved_by="reviewer")
+
+    report = health.fsck(store)
+    codes = {f.code for f in report.findings}
+    assert not any(c.startswith("decided_") for c in codes)
+
+
+def test_check_decided_proposals_presence_covers_every_non_delete_kind() -> None:
+    """`_check_decided_proposals`'s presence map is meant to be exhaustive
+    over ProposalKind (minus DELETE, checked separately via target_kind).
+    Exercised indirectly by test_fsck_survives_approved_goal_proposal for
+    the current six kinds; this pins the *shape* of that guarantee so a
+    seventh kind fails here - and via the runtime assert the next time any
+    test touches fsck - instead of crashing fsck for a user."""
+    assert set(ProposalKind) - {ProposalKind.DELETE} == {
+        ProposalKind.CLAIM,
+        ProposalKind.PAGE,
+        ProposalKind.ENTITY,
+        ProposalKind.RELATION,
+        ProposalKind.GOAL,
+    }
 
 
 def test_fsck_index_orphan_row(store: KBStore) -> None:
