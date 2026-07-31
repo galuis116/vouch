@@ -78,6 +78,9 @@ def missing_claim_refs(store: KBStore, proposal: Proposal) -> list[str]:
 EXPIRE_REASON = "expired"
 EXPIRE_ACTOR = "vouch-expire"
 ADMISSION_ACTOR = "vouch-admission"
+# Payload flag stamped by propose_page(update_existing=True). Popped before
+# Page model validation so it never reaches the durable artifact.
+_UPDATE_EXISTING_KEY = "_update_existing"
 _DEFAULT_EXPIRE_PENDING_DAYS = 90
 
 
@@ -334,6 +337,7 @@ def propose_page(
     session_id: str | None = None,
     dry_run: bool = False,
     scope: dict[str, Any] | str | None = None,
+    update_existing: bool = False,
 ) -> Proposal:
     if not title.strip():
         raise ProposalError("page title is empty")
@@ -369,8 +373,20 @@ def propose_page(
         )
     except PageKindError as e:
         raise ProposalError(str(e)) from e
-    payload = {
-        "id": slug_hint or _slugify(title),
+    page_id = slug_hint or _slugify(title)
+    # Opt-in update path for vault_to_kb (#219). Without this flag, approve()
+    # refuses an existing page id the same way it refuses claim collisions —
+    # otherwise a colliding title/slug (or a malicious slug_hint) silently
+    # overwrites durable content via update_page.
+    if update_existing:
+        try:
+            store.get_page(page_id)
+        except ArtifactNotFoundError as e:
+            raise ProposalError(
+                f"cannot update: page {page_id} does not exist"
+            ) from e
+    payload: dict[str, Any] = {
+        "id": page_id,
         "title": title.strip(),
         "body": body,
         "type": page_type,
@@ -380,6 +396,8 @@ def propose_page(
         "tags": tags or [],
         "metadata": meta,
     }
+    if update_existing:
+        payload[_UPDATE_EXISTING_KEY] = True
     _stamp_scope(store, payload, scope)
     return _file_proposal(
         store, kind=ProposalKind.PAGE, payload=payload,
@@ -713,7 +731,8 @@ def auto_approve_pending(
     closed instead of piling up; pages, entities and relations are approved
     unless something still blocks them. What stays pending is exactly the
     human-call residue: protected page kinds, pages with dead claim
-    references, an id already durable with different content, and DELETE
+    references, an id already durable (pages included — colliding page
+    proposals no longer overwrite via update_page), and DELETE
     proposals (retracting durable knowledge is never drained mechanically).
 
     Without trusted-agent this falls back to the receipt drain
@@ -794,10 +813,17 @@ def _payload_block_reason(
         except ValueError as e:
             return str(e)
     elif proposal.kind == ProposalKind.PAGE:
+        page_payload = dict(payload)
+        is_update = bool(page_payload.pop(_UPDATE_EXISTING_KEY, False))
         try:
-            page = Page(**payload)
+            page = Page(**page_payload)
         except (ValidationError, TypeError) as e:
             return f"invalid page payload: {e}"
+        if is_update:
+            try:
+                store.get_page(page.id)
+            except ArtifactNotFoundError:
+                return f"cannot update: page {page.id} does not exist"
         if not skip_dead_claim_refs:
             for cid in page.claims:
                 if not store._claim_path(cid).exists():
@@ -882,10 +908,14 @@ def approve(
     # Refuse to overwrite an existing artifact. Without this guard a retry
     # after a crash between put_<kind>() and move_proposal_to_decided() would
     # silently rewrite the artifact with new approved_by / created_at metadata.
-    # Exception: PAGE proposals may legitimately target an existing page when
-    # filed by vault_to_kb (vault edit flow) — the approve path handles that
-    # via update_page rather than put_page.
-    if proposal.kind not in (ProposalKind.PAGE, ProposalKind.DELETE):
+    # PAGE updates are opt-in via propose_page(update_existing=True) — used by
+    # vault_to_kb (#219). A bare colliding propose_page must not take the
+    # update_page path or durable content (and scope) is silently wiped.
+    is_page_update = (
+        proposal.kind == ProposalKind.PAGE
+        and bool(payload.get(_UPDATE_EXISTING_KEY))
+    )
+    if proposal.kind != ProposalKind.DELETE and not is_page_update:
         _ensure_no_existing_artifact(store, proposal.kind, payload["id"])
     result: Claim | Page | Entity | Relation
     if proposal.kind == ProposalKind.CLAIM:
@@ -914,6 +944,7 @@ def approve(
             if isinstance(payload.get("body"), str):
                 payload["body"] = strip_claim_markers(payload["body"], missing)
             dropped_claims = missing
+        is_update = bool(payload.pop(_UPDATE_EXISTING_KEY, False))
         page = Page(**payload)
         # Re-validate the kind at the gate: config may have tightened (or a
         # kind been removed) between propose and approve. Built-in kinds pass
@@ -927,15 +958,11 @@ def approve(
             )
         except PageKindError as e:
             raise ProposalError(str(e)) from e
-        # Vault-edit proposals use slug_hint=page_id so the payload id matches
-        # an existing page. In that case update rather than create so the
-        # approve path doesn't raise "page already exists" for every normal
-        # vault edit. For new pages (no existing artifact) put_page is used
-        # as before.
-        try:
-            store.get_page(page.id)
+        # Opt-in update (vault edit) vs create. Existence for updates was
+        # already checked in _payload_block_reason / the collision guard.
+        if is_update:
             store.update_page(page)
-        except ArtifactNotFoundError:
+        else:
             store.put_page(page)
         with index_db.open_db(store.kb_dir) as conn:
             index_db.index_page(
