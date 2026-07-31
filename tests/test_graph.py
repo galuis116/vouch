@@ -93,6 +93,55 @@ def test_find_neighbors_excludes_superseded_claims(store: KBStore) -> None:
     result = graph.find_neighbors(store, "new", depth=1)
     assert {n["id"] for n in result["nodes"]} == set()
     assert "old" not in {n["id"] for n in result["nodes"]}
+    # the SUPERSEDES relation lifecycle.supersede() creates must not leak as
+    # a dangling edge to a node the response itself excluded.
+    assert result["edges"] == []
+
+
+def test_find_neighbors_excludes_edge_to_missing_neighbor(store: KBStore) -> None:
+    """A relation left dangling after its target artifact was deleted (no
+    cascade delete) must not leak as an edge either - the same exclusion
+    `_node_kind`'s ArtifactNotFoundError already applies to `nodes`."""
+    store.put_entity(Entity(id="a", name="A", type=EntityType.CONCEPT))
+    store.put_entity(Entity(id="b", name="B", type=EntityType.CONCEPT))
+    store.put_relation(Relation(
+        id="a-b", source="a", relation=RelationType.USES, target="b",
+    ))
+    store._entity_path("b").unlink()
+    result = graph.find_neighbors(store, "a", depth=1)
+    assert result["nodes"] == []
+    assert result["edges"] == []
+
+
+def test_find_neighbors_excludes_archived_pages(store: KBStore) -> None:
+    """Archived pages are out of the live set; neighbors must match
+    context expansion's _page_is_live filter (#696)."""
+    from vouch.models import PageStatus
+
+    store.put_entity(Entity(
+        id="auth", name="Auth", type=EntityType.SYSTEM, page="old-doc",
+    ))
+    store.put_page(Page(
+        id="old-doc", title="Old Auth Doc", body="retired",
+        status=PageStatus.ARCHIVED, entities=["auth"],
+    ))
+    store.put_page(Page(
+        id="live-doc", title="Live Auth Doc", body="current",
+        status=PageStatus.ACTIVE, entities=["auth"],
+    ))
+    # only entity.page is a structural edge from the entity; use a relation
+    # so the live page is also reachable.
+    store.put_relation(Relation(
+        id="auth--references--live-doc",
+        source="auth",
+        relation=RelationType.REFERENCES,
+        target="live-doc",
+    ))
+    result = graph.find_neighbors(store, "auth", depth=1)
+    ids = {n["id"] for n in result["nodes"]}
+    assert "old-doc" not in ids
+    assert "live-doc" in ids
+    assert graph._neighbor_ok(store, "missing-page", "page") is False
 
 
 def test_find_neighbors_unknown_node_raises(store: KBStore) -> None:
@@ -124,6 +173,38 @@ def test_context_expand_graph_adds_neighbors(store: KBStore) -> None:
     assert "auth" in ids
     assert any(it["backend"] == "graph" for it in pack["items"])
     assert any("graph expansion" in w for w in pack["warnings"])
+
+
+def test_kb_context_mcp_honors_graph_rel_types(
+    store: KBStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the mcp kb_context tool must accept graph_rel_types like the jsonl handler
+    # and kb_neighbors do, so an agent can scope the graph walk to specific
+    # relation types. this surface silently dropped the filter.
+    from vouch.server import kb_context
+
+    src = store.put_source(b"e")
+    store.put_entity(Entity(id="auth", name="Auth", type=EntityType.SYSTEM))
+    store.put_entity(Entity(id="risk", name="Risk", type=EntityType.SYSTEM))
+    store.put_claim(Claim(id="jwt-claim", text="JWT tokens secure the API", evidence=[src.id]))
+    store.put_relation(
+        Relation(
+            id="c-ref-auth", source="jwt-claim", relation=RelationType.REFERENCES, target="auth"
+        )
+    )
+    store.put_relation(
+        Relation(
+            id="c-blk-risk", source="jwt-claim", relation=RelationType.BLOCKS, target="risk"
+        )
+    )
+    health.rebuild_index(store)
+    monkeypatch.chdir(store.root)
+
+    pack = kb_context("JWT tokens", limit=5, expand_graph=True, graph_rel_types=["references"])
+
+    ids = {it["id"] for it in pack["items"]}
+    assert "auth" in ids  # the references edge is followed
+    assert "risk" not in ids  # the blocks edge is filtered out by graph_rel_types
 
 
 def test_context_expand_graph_includes_page_claims(store: KBStore) -> None:

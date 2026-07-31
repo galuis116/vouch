@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .models import ClaimStatus, Relation
+from .models import ClaimStatus, PageStatus, Relation
 from .storage import ArtifactNotFoundError, KBStore
 
 _RETRACTED_CLAIM_STATUSES = frozenset({
@@ -145,6 +145,13 @@ def _edges_from_node(
 def _neighbor_ok(store: KBStore, node_id: str, kind: NodeKind) -> bool:
     if kind == "claim":
         return _claim_is_retrievable(store, node_id)
+    if kind == "page":
+        # match context._page_is_live — archived pages are out of the live
+        # set, so neighbors must not surface them either (#696).
+        try:
+            return store.get_page(node_id).status is not PageStatus.ARCHIVED
+        except ArtifactNotFoundError:
+            return False
     return store._node_exists(node_id)
 
 
@@ -176,6 +183,29 @@ def find_neighbors(
         for current in frontier:
             for edge in _edges_from_node(store, current, rel_types=rel_filter):
                 other = edge.target if edge.source == current else edge.source
+                # Only record the edge once its other endpoint has been
+                # accepted into `visited` - either already, or just now by
+                # passing the same existence/retrievability gate that decides
+                # node inclusion below. Recording it unconditionally leaked an
+                # edge pointing at a node the response itself excluded (a
+                # superseded/archived/redacted claim, or a missing one).
+                if other not in visited:
+                    try:
+                        kind = _node_kind(store, other)
+                    except ArtifactNotFoundError:
+                        continue
+                    if not _neighbor_ok(store, other, kind):
+                        continue
+                    visited.add(other)
+                    next_frontier.append(other)
+                    nodes.append({
+                        "id": other,
+                        "kind": kind,
+                        "distance": dist,
+                        "via": current,
+                        "relation": edge.relation,
+                        "summary": _summary_for(store, kind, other),
+                    })
                 ekey = (edge.source, edge.target, edge.relation)
                 if ekey not in seen_edges:
                     seen_edges.add(ekey)
@@ -185,24 +215,6 @@ def find_neighbors(
                         "relation": edge.relation,
                         "relation_id": edge.relation_id,
                     })
-                if other in visited:
-                    continue
-                try:
-                    kind = _node_kind(store, other)
-                except ArtifactNotFoundError:
-                    continue
-                if not _neighbor_ok(store, other, kind):
-                    continue
-                visited.add(other)
-                next_frontier.append(other)
-                nodes.append({
-                    "id": other,
-                    "kind": kind,
-                    "distance": dist,
-                    "via": current,
-                    "relation": edge.relation,
-                    "summary": _summary_for(store, kind, other),
-                })
                 if len(nodes) >= max_nodes:
                     break
             if len(nodes) >= max_nodes:
