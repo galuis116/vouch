@@ -497,6 +497,14 @@ def _check_decided_proposals(
             continue
         artifact_id = pr.payload.get("id") if isinstance(pr.payload, dict) else None
         if not artifact_id:
+            findings.append(
+                Finding(
+                    "error",
+                    "decided_no_artifact_id",
+                    f"approved proposal {pr.id} has no payload id",
+                    [pr.id],
+                )
+            )
             continue
         target_kind_str = (
             pr.payload.get("target_kind") if isinstance(pr.payload, dict) else None

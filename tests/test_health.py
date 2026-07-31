@@ -365,6 +365,22 @@ def test_fsck_flags_delete_with_invalid_target_kind(store: KBStore) -> None:
     assert "decided_delete_invalid_target_kind" in codes
 
 
+def test_fsck_flags_delete_proposal_with_no_artifact_id(store: KBStore) -> None:
+    """A malformed DELETE proposal with no payload id is reported the same
+    way a malformed create/edit proposal already is, not silently skipped."""
+    store.put_proposal(Proposal(
+        id="del-3",
+        kind=ProposalKind.DELETE,
+        proposed_by="agent",
+        payload={"target_kind": "claim", "snapshot": {}},
+        status=ProposalStatus.APPROVED,
+    ))
+
+    report = health.fsck(store)
+    codes = {f.code for f in report.findings}
+    assert "decided_no_artifact_id" in codes
+
+
 def test_fsck_index_orphan_row(store: KBStore) -> None:
     """An FTS5 row with no on-disk claim is reported as an index orphan."""
     src = store.put_source(b"e")
