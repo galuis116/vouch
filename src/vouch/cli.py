@@ -27,6 +27,7 @@ import yaml
 
 from . import __version__, bundle, health, hub_client, volunteer_context
 from . import adopt as adopt_mod
+from . import agents as agents_mod
 from . import audit as audit_mod
 from . import capture as capture_mod
 from . import chatgpt_import as chatgpt_import_mod
@@ -35,6 +36,7 @@ from . import compile as compile_mod
 from . import contradictions as contradictions_mod
 from . import digest as digest_mod
 from . import fetch as fetch_mod
+from . import goals as goals_mod
 from . import hub as hub_mod
 from . import inbox as inbox_mod
 from . import install_adapter as install_mod
@@ -80,6 +82,7 @@ from .proposals import (
     propose_claim,
     propose_delete,
     propose_entity,
+    propose_goal,
     propose_page,
     propose_relation,
     reject_auto_extracted,
@@ -116,6 +119,7 @@ def _cli_errors() -> Iterator[None]:
         migrations_mod.MigrationError,
         chatgpt_import_mod.ChatGPTImportError,
         codex_rollout_mod.CodexRolloutError,
+        agents_mod.AgentError,
         pins_mod.PinError,
     ) as e:
         raise click.ClickException(str(e)) from e
@@ -2568,6 +2572,75 @@ def notify_test(url: str, secret: str | None) -> None:
         sys.exit(1)
 
 
+# --- goals ----------------------------------------------------------------
+
+
+@cli.command(name="propose-goal")
+@click.option("--title", required=True)
+@click.option("--detail", default=None)
+@click.option("--claim", "claims", multiple=True, help="claim id this goal concerns")
+@click.option("--entity", "entities", multiple=True, help="entity id this goal concerns")
+@click.option("--tag", "tags", multiple=True)
+@click.option("--rationale", default=None)
+def propose_goal_cmd(
+    title: str,
+    detail: str | None,
+    claims: tuple[str, ...],
+    entities: tuple[str, ...],
+    tags: tuple[str, ...],
+    rationale: str | None,
+) -> None:
+    """Propose an in-flight objective for review."""
+    store = _load_store()
+    with _cli_errors():
+        pr = propose_goal(
+            store,
+            title=title,
+            detail=detail,
+            claims=list(claims),
+            entities=list(entities),
+            tags=list(tags),
+            rationale=rationale,
+            proposed_by=_whoami(),
+        )
+    click.echo(pr.id)
+
+
+@cli.command(name="goals")
+@click.option(
+    "--status",
+    default="open",
+    show_default=True,
+    help="goal status to list, or 'all' for every goal",
+)
+def list_goals_cmd(status: str) -> None:
+    """List approved goals, oldest first."""
+    store = _load_store()
+    with _cli_errors():
+        found = goals_mod.list_goals(
+            store, status=None if status == "all" else status
+        )
+    if not found:
+        click.echo(f"no {status} goals" if status != "all" else "no goals")
+        return
+    for goal in found:
+        click.echo(f"{goal.id:50} [{goal.status.value}] {goal.title}")
+
+
+@cli.command(name="goal-status")
+@click.argument("goal_id")
+@click.argument("status")
+@click.option("--reason", default=None)
+def set_goal_status_cmd(goal_id: str, status: str, reason: str | None) -> None:
+    """Move a goal to open / done / abandoned / blocked."""
+    store = _load_store()
+    with _cli_errors():
+        goal = life.set_goal_status(
+            store, goal_id=goal_id, status=status, actor=_whoami(), reason=reason
+        )
+    click.echo(f"{goal.id} -> {goal.status.value}")
+
+
 # --- lifecycle ------------------------------------------------------------
 
 
@@ -2949,6 +3022,18 @@ def capture_observe_cmd() -> None:
         session_id = str(payload.get("session_id") or "")
         if not session_id:
             return
+        start, ok = _hook_start(payload)
+        if not ok:
+            return
+        store = _capture_store(start)
+        if store is None:
+            return
+        cfg = capture_mod.load_config(store)
+        if not cfg.enabled:
+            return
+        if not cfg.realtime:
+            _emit_json({"skipped": "realtime-disabled"})
+            return
         tool_input = payload.get("tool_input")
         obs = capture_mod.summarize_tool(
             payload.get("tool_name"),
@@ -2957,18 +3042,13 @@ def capture_observe_cmd() -> None:
         )
         if obs is None:
             return
-        start, ok = _hook_start(payload)
-        if not ok:
-            return
-        store = _capture_store(start)
-        if store is None:
-            return
         tool_use_id = payload.get("tool_use_id")
         capture_mod.observe(
             store, session_id,
             tool=obs["tool"], summary=obs["summary"],
             files=obs.get("files"), cmd=obs.get("cmd"),
             tool_use_id=str(tool_use_id) if tool_use_id else None,
+            config=cfg,
         )
     except Exception:
         # a capture failure must never break the user's tool call.
@@ -3248,9 +3328,11 @@ def recall_cmd() -> None:
               help="Cap drafted pages (default: compile.max_pages, 5).")
 @click.option("--llm-cmd", default=None,
               help="Override compile.llm_cmd from config.yaml for this run.")
+@click.option("--profile", "profile", is_flag=True,
+              help="Compile the operator-profile page instead of topic pages.")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable report.")
 def compile_cmd(dry_run: bool, max_pages: int | None,
-                llm_cmd: str | None, as_json: bool) -> None:
+                llm_cmd: str | None, profile: bool, as_json: bool) -> None:
     """Compile approved claims into topic-page proposals (llm-wiki ingest).
 
     Runs the deployment-configured LLM (compile.llm_cmd) over the live
@@ -3261,10 +3343,17 @@ def compile_cmd(dry_run: bool, max_pages: int | None,
     store = _load_store()
     actor = os.environ.get("VOUCH_AGENT") or compile_mod.COMPILE_ACTOR
     try:
-        report = compile_mod.compile_kb(
-            store, actor=actor, triggered_by=_whoami(), llm_cmd=llm_cmd,
-            max_pages=max_pages, dry_run=dry_run,
-        )
+        if profile:
+            # A different page, a different claim set, the same review gate.
+            report = compile_mod.compile_profile(
+                store, actor=actor, triggered_by=_whoami(), llm_cmd=llm_cmd,
+                dry_run=dry_run,
+            )
+        else:
+            report = compile_mod.compile_kb(
+                store, actor=actor, triggered_by=_whoami(), llm_cmd=llm_cmd,
+                max_pages=max_pages, dry_run=dry_run,
+            )
     except compile_mod.CompileError as e:
         raise click.ClickException(str(e)) from e
     if as_json:
@@ -3760,6 +3849,130 @@ def graph(session: str | None, fmt: str) -> None:
     with _cli_errors():
         text = prov_mod.graph_export(store, session=session, fmt=fmt)
     click.echo(text, nl=False)
+
+
+@cli.group(name="agents")
+def agents_group() -> None:
+    """Which agents can write to this KB, and what each one did."""
+
+
+@agents_group.command("register")
+@click.argument("name")
+@click.option("--subject", required=True,
+              help="The token's auth subject (vouch agents subject <token>).")
+@click.option("--scope", "scopes", multiple=True,
+              help="Advisory scope to record (repeatable).")
+@click.option("--note", default=None, help="What this agent is for.")
+def agents_register(name: str, subject: str, scopes: tuple[str, ...],
+                    note: str | None) -> None:
+    """Give a token's subject a readable name."""
+    store = _load_store()
+    with _cli_errors():
+        agent = agents_mod.register(
+            store, subject=subject, name=name, actor=_whoami(),
+            scopes=tuple(scopes), note=note,
+        )
+    click.echo(f"registered {agent.name} ({agent.subject}) as {agent.status.value}")
+
+
+@agents_group.command("subject")
+@click.argument("token")
+def agents_subject(token: str) -> None:
+    """Print a token's auth subject without storing the token."""
+    click.echo(trust_mod.auth_subject_for_token(token))
+
+
+@agents_group.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Emit agents as JSON.")
+def agents_list(as_json: bool) -> None:
+    """Name, status, scopes, claimed and last-used for every agent."""
+    store = _load_store()
+    with _cli_errors():
+        agents = agents_mod.load_registry(store)
+    if as_json:
+        _emit_json({"agents": [
+            a.to_dict() | {
+                "last_seen": (
+                    ls.isoformat(timespec="seconds")
+                    if (ls := agents_mod.last_seen(store, a)) else None
+                )
+            }
+            for a in agents
+        ]})
+        return
+    if not agents:
+        click.echo(
+            "no registered agents. an unregistered token still authenticates "
+            "as an unnamed active agent."
+        )
+        return
+    for a in agents:
+        claimed = f"{a.claimed_at:%Y-%m-%d}" if a.claimed_at else "-"
+        seen = agents_mod.last_seen(store, a)
+        last = f"{seen:%Y-%m-%d}" if seen else "never"
+        scopes = ",".join(a.scopes) if a.scopes else "-"
+        click.echo(
+            f"{a.status.value:<8} {a.name:<24} {a.subject:<18} "
+            f"claimed={claimed}  last-used={last}  scopes={scopes}"
+        )
+
+
+@agents_group.command("show")
+@click.argument("name")
+@click.option("--limit", default=50, show_default=True, type=int,
+              help="Newest N events.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the replay as JSON.")
+def agents_show(name: str, limit: int, as_json: bool) -> None:
+    """Replay every audit event this agent produced."""
+    store = _load_store()
+    with _cli_errors():
+        agent = agents_mod.find(store, name)
+        if agent is None:
+            raise agents_mod.AgentError(f"unknown agent {name!r}")
+        events = agents_mod.replay(store, name, limit=limit)
+    if as_json:
+        _emit_json({"agent": agent.to_dict(), "events": events})
+        return
+    click.echo(f"{agent.name} ({agent.subject}) — {agent.status.value}")
+    if not events:
+        click.echo("no audit events attributed to this agent yet.")
+        return
+    for ev in events:
+        ids = ",".join(ev["object_ids"]) or "-"
+        # "<-" is something done to the agent; "  " is something it did.
+        marker = "  " if ev["by_agent"] else "<-"
+        click.echo(f"  {marker} {ev['created_at']}  {ev['event']:<26} {ids}")
+
+
+def _transition(name: str, status: agents_mod.AgentStatus, verb: str) -> None:
+    store = _load_store()
+    with _cli_errors():
+        agent = agents_mod.set_status(store, name, status, actor=_whoami())
+    click.echo(f"{verb} {agent.name} ({agent.subject})")
+
+
+@agents_group.command("pause")
+@click.argument("name")
+def agents_pause(name: str) -> None:
+    """Stop this agent's credential authenticating, reversibly."""
+    _transition(name, agents_mod.AgentStatus.PAUSED, "paused")
+
+
+@agents_group.command("resume")
+@click.argument("name")
+def agents_resume(name: str) -> None:
+    """Let a paused agent authenticate again."""
+    _transition(name, agents_mod.AgentStatus.ACTIVE, "resumed")
+
+
+@agents_group.command("revoke")
+@click.argument("name")
+@click.confirmation_option(
+    prompt="revocation is terminal — the agent cannot be resumed. continue?"
+)
+def agents_revoke(name: str) -> None:
+    """Permanently stop this credential. Terminal — issue a new token instead."""
+    _transition(name, agents_mod.AgentStatus.REVOKED, "revoked")
 
 
 @cli.command("pin")

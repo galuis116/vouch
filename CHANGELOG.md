@@ -7,6 +7,47 @@ All notable changes to vouch are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **operator profile page** (#614): `vouch compile --profile` drafts a single
+  "how this operator works" page from approved claims and files it PENDING like
+  any other page. Selection is **opt-in, never inferred** — a claim qualifies by
+  carrying a `compile.profile_tags` tag (default `preference`, `convention`,
+  `decision`, `correction`) or by naming `compile.profile_entity`, not by
+  looking like a first-person sentence. The prompt forbids personality, trait
+  and psychometric inference outright, and every substantive sentence must cite
+  a claim or it is dropped, so the page can only ever restate what was already
+  approved. A draft citing anything outside the selected set is refused. A
+  refresh re-proposes rather than rewriting, so the history of what the system
+  believed about you stays auditable instead of being silently mutated.
+- **agent registry — who can write, and what each agent did** (#607):
+  `vouch agents list / show / pause / resume / revoke`, keyed on the
+  `auth_subject` hash `trust.py` already derives, so the committed
+  `.vouch/agents.yaml` holds names, status, scopes and claim dates while the
+  credential itself stays in local config. Pause and revoke are enforced at one
+  chokepoint (`trust.authorized_bearer_token`), so MCP-over-HTTP and
+  JSONL-over-HTTP inherit revocation without two implementations, and a denied
+  token is indistinguishable from a wrong one. Revocation is terminal by
+  design. `vouch agents show` replays every audit event an agent produced
+  alongside the control-plane transitions applied to it — the per-action
+  attribution ditto's own docs stop short of. Existing deployments are
+  unaffected: an unregistered token still authenticates as an unnamed active
+  agent, and a corrupted status fails closed rather than reading as active.
+- **first-class goals — review-gated in-flight objectives** (#427): vouch could
+  record everything a project *knows* and nothing about what it is *doing*, so
+  an agent re-orienting after a compaction recovered facts and decisions but
+  not intent ("mid-migration to typed config", "release blocked on the
+  audit-race fix") — that lived as prose in a session summary, unqueryable.
+  Adds a `Goal` artifact with a `GoalStatus` of `open` / `done` / `abandoned` /
+  `blocked`, taking the same route as every other write: `kb.propose_goal`
+  files a pending proposal, a human approves it, and the goal lands as diffable
+  yaml under `.vouch/goals/`. Approval is pinned to `open` — a proposal cannot
+  land a goal that is already `done`, which would put a transition on disk that
+  never passed the lifecycle path. Every later move goes through
+  `lifecycle.set_goal_status`, the single write path, which appends a
+  `goal.status` event to `audit.log.jsonl` and a row to the goal's own
+  append-only `history`. Open goals resurface oldest-first in `vouch digest`
+  and in the SessionStart recall digest, so a returning operator or a fresh
+  agent session sees what is in flight before it picks something up.
+  `vouch propose-goal`, `vouch goals`, `vouch goal-status`, plus MCP and JSONL.
 - **explicit pins — a working set that always enters the pack** (#615):
   `vouch pin <id>` / `vouch pins list` / `vouch unpin <id>`. Pinned claims and
   pages lead every context pack instead of having to win the query each turn,
@@ -57,6 +98,16 @@ All notable changes to vouch are documented here. Format follows
   from the second pass so the *original* creating proposal doesn't
   false-positive as `decided_missing_artifact` once its artifact is
   correctly gone.
+- **`kb.confirm`-ing a claim no longer drops it from the hot-memory
+  sidebar** (#520 reopened, root-caused): `_is_active` listed only
+  `WORKING`/`STABLE`/`CONTESTED` as live statuses, omitting `ACTIONABLE`
+  — the status `lifecycle.confirm()`'s first confirmation moves a
+  `WORKING` claim to. A claim disappeared from `_meta.vouch_hot_memory`
+  the moment it was confirmed, and a fresh KB's onboarding seed claim
+  (filed `ACTIONABLE` from birth) never appeared at all. `_is_active` is
+  now the complement of the retired statuses (`SUPERSEDED`/`ARCHIVED`/
+  `REDACTED`), matching `context.py`'s `_RETRACTED_CLAIM_STATUSES`
+  pattern, so a future status addition defaults to active.
 - **`vouch stats` / `kb.stats` no longer crash on one corrupt `decided/*.yaml`**:
   `_list_decided` parsed every decided proposal strictly, so a single bad file
   aborted `review_summary` / `collect_stats`. It now uses `_load_or_skip` —
@@ -238,6 +289,13 @@ All notable changes to vouch are documented here. Format follows
   markers; absolute bench scores shift, paired comparisons were fair
   either way. the reference baseline table is refreshed.
 ### Changed
+- **capture.realtime defaults off** (#602):
+  per-tool `PostToolUse` observe is opt-in. when off (the new default),
+  `capture observe` no-ops with `{"skipped": "realtime-disabled"}` and
+  SessionEnd rebuilds tool activity from the Claude transcript so
+  `min_observations` still works. shipped claude-code hooks drop
+  PostToolUse/Stop; re-install does not prune old hooks from existing
+  `settings.json`. set `capture.realtime: true` to restore the buffer.
 - **core PRs can auto-merge, on two mechanical bars.** the blanket "core
   is never armed" refusal is gone; both authorization surfaces (the
   `auto-merge` label and the `/auto-merge` comment) now route through one
