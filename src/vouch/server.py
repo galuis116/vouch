@@ -21,6 +21,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import audit, bundle, health, mcp_profiles, volunteer_context
 from . import compile as compile_mod
+from . import correction as correction_mod
 from . import digest as digest_mod
 from . import goals as goals_mod
 from . import hot_memory as hot_mod
@@ -818,6 +819,25 @@ def kb_propose_delete(
     except (ProposalError, ArtifactNotFoundError, ValueError) as e:
         raise ValueError(str(e)) from e
     return _proposal_response(pr, dry_run)
+
+
+@mcp.tool()
+def kb_capture_correction(
+    prompt: str, session_id: str | None = None, context: str | None = None
+) -> dict[str, Any]:
+    """Turn a user correction into a PENDING claim proposal.
+
+    Detects pushback ("no, we deploy from main not release") and files it for
+    review, tagged `auto:correction` so the reviewer sees where it came from.
+    Proposes only — there is no path from here to approve. Bounded by
+    `capture.correction.max_per_session` and deduped against what the KB
+    already knows; returns `{"captured": false, "reason": ...}` when a guard
+    declines, so a caller can see why nothing was filed.
+    """
+    return correction_mod.capture(
+        _store(), prompt=prompt, session_id=session_id,
+        agent=_agent(), context=context,
+    )
 
 
 @mcp.tool()

@@ -34,6 +34,7 @@ from . import chatgpt_import as chatgpt_import_mod
 from . import codex_rollout as codex_rollout_mod
 from . import compile as compile_mod
 from . import contradictions as contradictions_mod
+from . import correction as correction_mod
 from . import digest as digest_mod
 from . import fetch as fetch_mod
 from . import goals as goals_mod
@@ -2570,6 +2571,26 @@ def notify_test(url: str, secret: str | None) -> None:
     click.echo("delivered" if ok else "delivery failed")
     if not ok:
         sys.exit(1)
+
+
+# --- correction capture ---------------------------------------------------
+
+
+@cli.command(name="capture-correction")
+@click.argument("prompt")
+@click.option("--session-id", default=None)
+@click.option("--context", default=None, help="what the agent had just done")
+def capture_correction_cmd(
+    prompt: str, session_id: str | None, context: str | None
+) -> None:
+    """File a user correction as a pending claim proposal, if it is one."""
+    store = _load_store()
+    with _cli_errors():
+        report = correction_mod.capture(
+            store, prompt=prompt, session_id=session_id,
+            agent=_whoami(), context=context,
+        )
+    click.echo(json.dumps(report, indent=2))
 
 
 # --- goals ----------------------------------------------------------------

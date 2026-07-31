@@ -29,9 +29,9 @@ import yaml
 
 from . import audit as audit_mod
 from . import llm_draft
-from .config_coerce import coerce_bool
+from .config_coerce import coerce_bool, coerce_numeric
 from .context import _RETRACTED_CLAIM_STATUSES
-from .models import ProposalStatus
+from .models import Page, PageStatus, ProposalStatus
 from .proposals import ProposalError, _slugify, propose_page
 from .storage import ArtifactNotFoundError, KBStore
 
@@ -150,15 +150,6 @@ class CompileConfig:
     profile_entity: str | None = None
 
 
-def _coerce(value: Any, default: Any, cast: Any) -> Any:
-    # A config typo (max_pages: five) must degrade to the default, not take
-    # down every caller — the web queue reads this config on each render.
-    try:
-        return cast(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def load_config(store: KBStore) -> CompileConfig:
     """Read ``compile:`` from config.yaml; fall back to defaults."""
     try:
@@ -173,10 +164,10 @@ def load_config(store: KBStore) -> CompileConfig:
     cmd = raw.get("llm_cmd")
     return CompileConfig(
         llm_cmd=str(cmd) if cmd else None,
-        max_pages=_coerce(
+        max_pages=coerce_numeric(
             raw.get("max_pages", DEFAULT_MAX_PAGES), DEFAULT_MAX_PAGES, int,
         ),
-        timeout_seconds=_coerce(
+        timeout_seconds=coerce_numeric(
             raw.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS),
             DEFAULT_TIMEOUT_SECONDS, float,
         ),
@@ -212,6 +203,19 @@ class CompileReport:
             "draft_count": len(self.drafts),
             "dry_run": self.dry_run,
         }
+
+
+def _live_pages(store: KBStore) -> list[Page]:
+    """Pages the wiki still has, i.e. everything but the archived ones.
+
+    Archiving is how an operator retires a bad compile page. Counting an
+    archived page as taken makes that retirement one-way: the LLM is told not
+    to redraft a topic the wiki no longer carries, and a draft that reuses the
+    title is dropped as a duplicate of a page nobody can read. Claims already
+    get this treatment via `_RETRACTED_CLAIM_STATUSES`; this is the same live
+    set recall, digest, search and the wiki view use.
+    """
+    return [p for p in store.list_pages() if p.status is not PageStatus.ARCHIVED]
 
 
 def _pending_page_names(store: KBStore) -> set[str]:
@@ -309,7 +313,7 @@ def build_prompt(
     ]
     if not claims:
         raise CompileError("nothing to compile: the KB has no live approved claims")
-    pages = store.list_pages()
+    pages = _live_pages(store)
     pending = _pending_page_names(store)
 
     lines = [
@@ -657,7 +661,7 @@ def compile_kb(
 
     report = CompileReport(drafts=drafts, dry_run=dry_run)
 
-    existing = store.list_pages()
+    existing = _live_pages(store)
     taken_names = {p.title.strip().lower() for p in existing}
     taken_names |= {p.id.strip().lower() for p in existing}
     taken_names |= _pending_page_names(store)

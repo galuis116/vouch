@@ -191,6 +191,9 @@ HOT_MEMORY_EXCLUDED: dict[str, str] = {
     "kb.session_end": "session control — not a KB read",
     "kb.volunteer_context": "push channel — already surfaces hot claims",
     "kb.crystallize": "write path — proposal intake",
+    "kb.capture_correction": (
+        "write path — review gate (files a pending claim proposal)"
+    ),
     "kb.index_rebuild": "maintenance — mutates derived index",
     "kb.lint": "diagnostics — no claim payload",
     "kb.doctor": "diagnostics — no claim payload",

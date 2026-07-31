@@ -82,6 +82,7 @@ METHODS = [
     "kb.session_transcript",
     "kb.volunteer_context",
     "kb.crystallize",
+    "kb.capture_correction",
     "kb.summarize_session",
     "kb.index_rebuild",
     "kb.lint",

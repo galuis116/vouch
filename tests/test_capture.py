@@ -44,6 +44,19 @@ def test_load_config_quoted_false_does_not_enable(store: KBStore) -> None:
     assert cfg.realtime is False
 
 
+def test_load_config_malformed_numeric_falls_back(store: KBStore) -> None:
+    """Regression: bare int()/float() on a config typo used to raise and
+    crash every capture.load_config() caller (session-split capture, codex
+    rollout ingestion) instead of degrading to the default."""
+    store.config_path.write_text(
+        'capture:\n  min_observations: "three"\n'
+        '  dedup_window_seconds: "soon"\n'
+    )
+    cfg = cap.load_config(store)
+    assert cfg.min_observations == cap.DEFAULT_MIN_OBSERVATIONS
+    assert cfg.dedup_window_seconds == cap.DEFAULT_DEDUP_WINDOW_SECONDS
+
+
 def test_buffer_path_under_captures_dir(store: KBStore) -> None:
     p = cap.buffer_path(store, "sess-123")
     assert p == store.kb_dir / "captures" / "sess-123.jsonl"

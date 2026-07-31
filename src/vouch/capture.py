@@ -31,7 +31,7 @@ from typing import Any
 
 import yaml
 
-from .config_coerce import coerce_bool
+from .config_coerce import coerce_bool, coerce_numeric
 from .enrich import Enrichment
 from .models import ProposalStatus
 from .secrets import mask_secrets
